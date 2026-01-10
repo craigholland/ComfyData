@@ -1,0 +1,74 @@
+# ======================
+# Python / bytecode
+# ======================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ======================
+# Virtual envs
+# ======================
+.venv/
+venv/
+ENV/
+env/
+.python-version
+.idea/*
+# ======================
+# Poetry
+# ======================
+poetry.lock
+*.egg-info/
+dist/
+build/
+
+# ======================
+# Testing / coverage
+# ======================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+
+# ======================
+# IDEs / editors
+# ======================
+.vscode/
+.idea/
+*.iml
+
+# ======================
+# OS junk
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# Logs
+# ======================
+*.log
+
+# ======================
+# ComfyUI Dict Builder user data
+# (templates/instances should live under ComfyUI/user/default/)
+# ======================
+ComfyUI/user/default/comfy_data*/**
+user/default/comfy_data*/**
+
+# If your repo includes a local ComfyUI checkout during dev:
+ComfyUI/output/**
+ComfyUI/temp/**
+ComfyUI/input/**
+ComfyUI/models/**
+ComfyUI/custom_nodes/**
+
+# ======================
+# Archives
+# ======================
+*.tar
+*.tar.gz
+*.tgz
+*.tar.xz
+*.zip
