@@ -507,7 +507,7 @@ app.registerExtension({
         }
 
         // Show context menu of schema names
-        makeContextMenu(schemas, e, async (picked) => {
+        makeContextMenu(schemas, async (picked) => {
           const resp = await apiGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
           if (!resp?.ok) {
             alert(resp?.error || "Load failed");
@@ -517,7 +517,7 @@ app.registerExtension({
           setState(this, newState);
           syncYamlWidget();
           this.setDirtyCanvas(true, true);
-        });
+        }, e);
       };
 
       if (btns.new && hit(local, btns.new)) { doNew(); return true; }
@@ -552,7 +552,7 @@ app.registerExtension({
 
         if (hit(local, row.typeRect)) {
           // Show a context menu to pick a type
-          makeContextMenu(FIELD_TYPES, e, (picked) => {
+          makeContextMenu(FIELD_TYPES, (picked) => {
             f.type = picked;
 
             // If switching away from single-select, clear values
@@ -567,7 +567,7 @@ app.registerExtension({
             setState(this, state);
             syncYamlWidget();
             this.setDirtyCanvas(true, true);
-          });
+          }, e);
           return true;
         }
 
