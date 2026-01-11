@@ -33,6 +33,15 @@ const UI = {
   colRemoveW: 22,
 };
 
+let LAST_MOUSE_EVENT = null;
+
+function captureMouseEvent(evt) {
+  // We need a real DOM MouseEvent with clientX/clientY
+  if (evt && typeof evt.clientX === "number" && typeof evt.clientY === "number") {
+    LAST_MOUSE_EVENT = evt;
+  }
+}
+
 function defaultState() {
   return {
     schema_name: "",
@@ -218,20 +227,24 @@ function hit(pt, rect) {
   return pt.x >= rect.x && pt.x <= rect.x + rect.w && pt.y >= rect.y && pt.y <= rect.y + rect.h;
 }
 
-function makeContextMenu(values, onPick) {
-  // LiteGraph provides a context menu helper
-  // `new LiteGraph.ContextMenu(items, options)`
+function makeContextMenu(values, onPick, evt) {
   const items = values.map(v => ({ content: v, value: v }));
-  // global LiteGraph is available in ComfyUI frontend
+
+  const anchorEvt =
+    (evt && typeof evt.clientX === "number" && typeof evt.clientY === "number")
+      ? evt
+      : LAST_MOUSE_EVENT;
+
   // eslint-disable-next-line no-undef
   new LiteGraph.ContextMenu(items, {
-    event: evt || null,
+    event: anchorEvt || null,
     callback: (item) => {
       if (!item) return;
       onPick(item.value ?? item.content);
     },
   });
 }
+
 
 app.registerExtension({
   name: EXT_NAME,
@@ -245,6 +258,17 @@ app.registerExtension({
     const origOnMouseDown = proto.onMouseDown;
 
     proto.onNodeCreated = function () {
+        // Capture mouse events from the canvas so menus always anchor correctly
+    if (!app?.canvas?._comfydata_mousehook_installed) {
+      app.canvas._comfydata_mousehook_installed = true;
+
+      const oldProcess = app.canvas.processMouseDown;
+      app.canvas.processMouseDown = function (evt) {
+        captureMouseEvent(evt);
+        return oldProcess.apply(this, arguments);
+      };
+    }
+
       const r = origOnNodeCreated?.apply(this, arguments);
 
       ensureNodeSize(this);
@@ -373,6 +397,7 @@ app.registerExtension({
     };
 
     proto.onMouseDown = function (e, pos, graphcanvas) {
+        captureMouseEvent(e);
       const r = origOnMouseDown?.apply(this, arguments);
 
       if (this.flags?.collapsed) return r;
