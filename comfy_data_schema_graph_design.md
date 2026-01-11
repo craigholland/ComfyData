@@ -443,3 +443,52 @@ These are intentionally deferred until the editor experience is fully solid:
 
 Each of these builds directly on the foundation already in place, without requiring architectural rewrites.
 
+
+### 12.2 UX Wins & Next Steps
+
+This subsection captures the most recent UX-focused improvements to the editor experience and frames the immediate follow-up work to keep momentum without expanding scope.
+
+#### Recent UX Wins
+
+- **Removed disruptive modal dialogs**: replaced alert-style flows with non-blocking, in-canvas feedback (toasts), keeping the user in context.
+- **Inline editing overlays** for text inputs:
+  - `schema.name` editing anchored to the schema chip
+  - Field name editing anchored directly to the field row
+  - `single-select` values editable via an inline textarea overlay (supports multi-line entry and Ctrl/Cmd+Enter to commit).
+- **Input normalization for values**:
+  - Trims whitespace, splits on commas/newlines, deduplicates (case-insensitive), and re-joins as a clean CSV.
+- **Nested object ergonomics (Phase D foundation)**:
+  - Object fields support expand/collapse with a clear caret indicator.
+  - Children are rendered as indented rows (flattened render model).
+  - “+ Add field” row inside object blocks enables fast nested schema building.
+- **Save As anchored to schema identity**: Save-As uses the schema chip as the editing anchor, then persists with the chosen name.
+
+#### Next Steps (Tactical, Low-Risk)
+
+These are intentionally narrow, focused on robustness and polish rather than new features:
+
+1. **Harden API calls (single wrapper)**
+   - Create a `safeGetJson` / `safePostJson` helper that:
+     - wraps `fetch` in `try/catch`
+     - validates `res.ok`
+     - returns `{ ok: false, error: ... }` on network/HTTP/JSON errors
+   - Ensure all call sites handle the same shape consistently.
+
+2. **Ensure state consistency on failures**
+   - Only update `state.schema_name` after a successful Save-As response.
+   - Keep a single place that performs: `setState()` → `syncYamlWidget()` → `setDirtyCanvas()`.
+
+3. **Add minimal validation feedback (UI-only)**
+   - Prevent saving schemas with blank `schema.name`.
+   - Prevent saving fields with blank names (or auto-prune them on save).
+   - Optionally show an inline toast if a duplicate field name is detected within the same object scope.
+
+4. **Scrolling / paging for long schemas**
+   - Add a simple scroll offset in editor state (mouse wheel over node) so editing doesn’t “truncate” once a schema exceeds the visible rows.
+
+5. **Micro polish**
+   - Keyboard shortcuts: Enter/Esc commit/cancel already exist in overlays; consider `Ctrl/Cmd+S` for save when node is focused.
+   - Visual affordance: slightly different chip text for placeholders like “(name)” / “(click to set)”.
+
+These keep us on the “UX first” track while preserving the clean separation: **frontend owns ergonomics, backend owns persistence**.
+
