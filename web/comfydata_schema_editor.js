@@ -332,6 +332,100 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   }, 0);
 }
 
+function normalizeValuesToCsv(text) {
+  const raw = String(text ?? "");
+
+  // split on commas OR newlines
+  const parts = raw
+    .split(/[,|\n]/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // dedupe while preserving order
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+
+  return out.join(", ");
+}
+
+function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
+  const canvasEl = getCanvasElement();
+  if (!canvasEl) return;
+
+  // Remove existing editor
+  if (node._comfydata_inline_input) {
+    try { node._comfydata_inline_input.remove(); } catch (_) {}
+    node._comfydata_inline_input = null;
+  }
+
+  const screen = toScreenRect(node, rect);
+  if (!screen) return;
+
+  const ta = document.createElement("textarea");
+  ta.value = initialValue ?? "";
+
+  // size: reuse rect but make it taller (3–4 rows)
+  const height = Math.max(60, Math.round(screen.height * 3));
+
+  ta.style.position = "fixed";
+  ta.style.left = `${Math.round(screen.left)}px`;
+  ta.style.top = `${Math.round(screen.top)}px`;
+  ta.style.width = `${Math.max(80, Math.round(screen.width))}px`;
+  ta.style.height = `${height}px`;
+  ta.style.zIndex = "9999";
+  ta.style.fontSize = "12px";
+  ta.style.padding = "6px 8px";
+  ta.style.borderRadius = "8px";
+  ta.style.border = "1px solid rgba(255,255,255,0.25)";
+  ta.style.color = "white";
+  ta.style.background = "rgba(20,20,20,0.92)";
+  ta.style.outline = "none";
+  ta.style.resize = "none";
+  ta.style.lineHeight = "16px";
+
+  const finish = (commit) => {
+    try { ta.remove(); } catch (_) {}
+    if (node._comfydata_inline_input === ta) node._comfydata_inline_input = null;
+
+    if (commit) {
+      onCommit?.(ta.value);
+    }
+    node.setDirtyCanvas(true, true);
+  };
+
+  ta.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      finish(false);
+      return;
+    }
+
+    // Let Enter create newlines normally.
+    // Use Ctrl+Enter (or Cmd+Enter) to commit.
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault();
+      finish(true);
+    }
+  });
+
+  // blur commits (same behavior as input)
+  ta.addEventListener("blur", () => finish(true));
+
+  document.body.appendChild(ta);
+  node._comfydata_inline_input = ta;
+
+  setTimeout(() => {
+    ta.focus();
+    ta.select();
+  }, 0);
+}
+
 // ---------- Extension registration ----------
 
 app.registerExtension({
@@ -671,11 +765,22 @@ app.registerExtension({
               // Clear values if leaving single-select
               if (f.type !== "single-select") delete f.values_csv;
 
-              // Prompt values for now if switching to single-select
               if (f.type === "single-select") {
-                const csv = prompt("single-select values (comma-separated):", f.values_csv || "");
-                if (csv !== null) f.values_csv = csv;
-              }
+                  // Open inline textarea over the Values chip for this row
+                  setTimeout(() => {
+                    beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
+                      f.values_csv = normalizeValuesToCsv(val);
+
+                      // If empty after normalize, just remove it (keeps schema clean)
+                      if (!f.values_csv.trim()) delete f.values_csv;
+
+                      setState(this, state);
+                      syncYamlWidget();
+                      this.setDirtyCanvas(true, true);
+                    });
+                  }, 0);
+                }
+
 
               setState(this, state);
               syncYamlWidget();
@@ -689,14 +794,16 @@ app.registerExtension({
 
         if (hit(local, row.valsRect)) {
           if (f.type === "single-select") {
-            const csv = prompt("single-select values (comma-separated):", f.values_csv || "");
-            if (csv !== null) {
-              f.values_csv = csv;
-              setState(this, state);
-              syncYamlWidget();
-              this.setDirtyCanvas(true, true);
+              beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
+                f.values_csv = normalizeValuesToCsv(val);
+                if (!f.values_csv.trim()) delete f.values_csv;
+
+                setState(this, state);
+                syncYamlWidget();
+                this.setDirtyCanvas(true, true);
+              });
             }
-          } else if (f.type === "object") {
+        else if (f.type === "object") {
             alert("Object field editing is Phase D (nested fields). For now this is a placeholder.");
           }
           stop();
