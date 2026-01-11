@@ -245,6 +245,104 @@ function makeContextMenu(values, onPick, evt) {
   });
 }
 
+function getCanvasElement() {
+  // ComfyUI uses a single canvas element for the graph
+  // app.canvas.canvas is the DOM canvas element in most builds
+  return app?.canvas?.canvas || document.querySelector("canvas");
+}
+
+function toScreenRect(node, rect) {
+  // Convert a node-local rect to browser screen pixels
+  // We use the graphcanvas transform.
+  const gc = app?.canvas;
+  const canvasEl = getCanvasElement();
+  if (!gc || !canvasEl) return null;
+
+  // In LiteGraph, canvas is transformed by scale/offset
+  const scale = gc.ds?.scale ?? 1;
+  const offx = gc.ds?.offset?.[0] ?? 0;
+  const offy = gc.ds?.offset?.[1] ?? 0;
+
+  // Node local -> graph coords
+  const gx = node.pos[0] + rect.x;
+  const gy = node.pos[1] + rect.y;
+
+  // Graph coords -> canvas coords (pixels within canvas)
+  const cx = (gx + offx) * scale;
+  const cy = (gy + offy) * scale;
+
+  // Canvas coords -> screen coords
+  const canvasBounds = canvasEl.getBoundingClientRect();
+  return {
+    left: canvasBounds.left + cx,
+    top: canvasBounds.top + cy,
+    width: rect.w * scale,
+    height: rect.h * scale,
+  };
+}
+
+function beginInlineEdit(node, rect, initialValue, onCommit) {
+  // Reuse a single input element per node
+  const canvasEl = getCanvasElement();
+  if (!canvasEl) return;
+
+  // Kill any existing editor first
+  if (node._comfydata_inline_input) {
+    try { node._comfydata_inline_input.remove(); } catch (_) {}
+    node._comfydata_inline_input = null;
+  }
+
+  const screen = toScreenRect(node, rect);
+  if (!screen) return;
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = initialValue ?? "";
+
+  input.style.position = "fixed";
+  input.style.left = `${Math.round(screen.left)}px`;
+  input.style.top = `${Math.round(screen.top)}px`;
+  input.style.width = `${Math.max(40, Math.round(screen.width))}px`;
+  input.style.height = `${Math.max(18, Math.round(screen.height))}px`;
+  input.style.zIndex = "9999";
+  input.style.fontSize = "12px";
+  input.style.padding = "2px 6px";
+  input.style.borderRadius = "6px";
+  input.style.border = "1px solid rgba(255,255,255,0.25)";
+  input.style.color = "white";
+  input.style.background = "rgba(20,20,20,0.92)";
+  input.style.outline = "none";
+
+  const finish = (commit) => {
+    // Remove editor
+    try { input.remove(); } catch (_) {}
+    if (node._comfydata_inline_input === input) node._comfydata_inline_input = null;
+
+    if (commit) {
+      const v = input.value;
+      onCommit?.(v);
+    }
+    node.setDirtyCanvas(true, true);
+  };
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      finish(true);
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      finish(false);
+    }
+  });
+
+  input.addEventListener("blur", () => finish(true));
+
+  document.body.appendChild(input);
+  node._comfydata_inline_input = input;
+
+  input.focus();
+  input.select();
+}
 
 app.registerExtension({
   name: EXT_NAME,
@@ -423,14 +521,14 @@ app.registerExtension({
 
       // Header: schema name edit
       if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
-        const name = prompt("Schema name (schema.name):", state.schema_name || "");
-        if (name !== null) {
-          state.schema_name = name.trim();
-          setState(this, state);
-          this.setDirtyCanvas(true, true);
+          const rect = hits.header.schemaName;
+          beginInlineEdit(this, rect, state.schema_name || "", (val) => {
+            state.schema_name = (val || "").trim();
+            setState(this, state);
+          });
+          return true;
         }
-        return true;
-      }
+
 
       // Buttons
       const btns = hits.buttons || {};
@@ -453,14 +551,41 @@ app.registerExtension({
       };
 
       const doAddField = () => {
-        const name = prompt("New field name:", "");
-        if (!name) return;
-        const type = "str";
-        state.fields.push({ name: name.trim(), type });
-        setState(this, state);
-        syncYamlWidget();
-        this.setDirtyCanvas(true, true);
-      };
+          // Create a placeholder field and immediately edit its name inline.
+          state.fields.push({ name: "", type: "str" });
+          setState(this, state);
+          this.setDirtyCanvas(true, true);
+
+          // Attempt to focus the just-added row's name cell.
+          // It's likely the last row; we’ll compute its expected rect.
+          const idx = state.fields.length - 1;
+
+          // If we have hit rects (drawn this frame), use them; otherwise approximate.
+          const rows = this._comfydata_hits?.rows || [];
+          const rowHit = rows.find(r => r.idx === idx);
+
+          const nameRect = rowHit?.nameRect || {
+            x: UI.pad,
+            y: (UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6) + (idx * (UI.rowH + 6)),
+            w: UI.colNameW,
+            h: UI.rowH,
+          };
+
+          beginInlineEdit(this, nameRect, "", (val) => {
+            const name = (val || "").trim();
+            if (!name) {
+              // If user leaves it blank, remove the placeholder field.
+              state.fields.splice(idx, 1);
+            } else {
+              state.fields[idx].name = name;
+            }
+            setState(this, state);
+            syncYamlWidget();
+          });
+
+          syncYamlWidget();
+        };
+
 
       const doSaveAs = async () => {
         const name = prompt("Save As (filename identity):", state.schema_name || "");
@@ -540,15 +665,14 @@ app.registerExtension({
         }
 
         if (hit(local, row.nameRect)) {
-          const newName = prompt("Field name:", f.name || "");
-          if (newName !== null) {
-            f.name = newName.trim();
+          beginInlineEdit(this, row.nameRect, f.name || "", (val) => {
+            f.name = (val || "").trim();
             setState(this, state);
             syncYamlWidget();
-            this.setDirtyCanvas(true, true);
-          }
+          });
           return true;
         }
+
 
         if (hit(local, row.typeRect)) {
           // Show a context menu to pick a type
