@@ -225,11 +225,11 @@ function makeContextMenu(values, onPick) {
   // global LiteGraph is available in ComfyUI frontend
   // eslint-disable-next-line no-undef
   new LiteGraph.ContextMenu(items, {
-    event: window.event,
+    event: evt || null,
     callback: (item) => {
       if (!item) return;
       onPick(item.value ?? item.content);
-    }
+    },
   });
 }
 
@@ -482,7 +482,7 @@ app.registerExtension({
         }
 
         // Show context menu of schema names
-        makeContextMenu(schemas, async (picked) => {
+        makeContextMenu(schemas, e, async (picked) => {
           const resp = await apiGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
           if (!resp?.ok) {
             alert(resp?.error || "Load failed");
@@ -527,7 +527,7 @@ app.registerExtension({
 
         if (hit(local, row.typeRect)) {
           // Show a context menu to pick a type
-          makeContextMenu(FIELD_TYPES, (picked) => {
+          makeContextMenu(FIELD_TYPES, e, (picked) => {
             f.type = picked;
 
             // If switching away from single-select, clear values
