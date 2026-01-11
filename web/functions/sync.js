@@ -1,26 +1,24 @@
-// ComfyData – Sync Utilities (Frontend)
+// ComfyData – Sync Helpers (web/functions/sync.js)
 //
 // Purpose
-// - Centralize the editor “commit” flow used throughout the schema editor UI.
-// - Keep state persistence + debug widget sync + canvas redraw in one place.
+// - Centralize the “state sync” patterns used by the canvas editor.
+// - Keep call-sites consistent and small:
+//     setState() -> syncYamlWidget() -> setDirtyCanvas()
 //
-// Responsibilities
-// - syncYamlWidget(node): Writes a YAML-ish debug view of the current editor doc into the hidden schema_yaml widget.
-// - commitState(node, state): Persists state to node.properties, syncs the YAML widget, and dirties the canvas.
-// - commitNewState(node, newState): Replaces editor state and performs the same commit flow.
+// What this file DOES
+// - syncs the hidden `schema_yaml` widget (debug/output) from the editor state
+// - provides a single “commit” helper to apply state + redraw
 //
-// Notes
-// - All functions are designed to be non-throwing. Failures are treated as non-fatal (debug widget only).
-// - This file should NOT show toasts; the caller decides when to notify the user.
+// What this file does NOT do
+// - API calls / persistence (that lives in api.js)
+// - UI drawing / hit-testing (draw.js, hit_test.js, etc.)
 
-import { buildDocFromState } from "./doc.js";
-import { dumpYamlish } from "./yaml.js";
-import { getSchemaYamlWidget } from "./widgets.js";
-import { getState, setState } from "./state.js";
+import { getState, setState, getSchemaYamlWidget } from "./state.js";
+import { buildDocFromState, dumpYamlish } from "./yamlish.js";
 
 /**
- * Sync the hidden schema_yaml widget (debug/output) from the node's current state.
- * Non-fatal: if anything fails, we just skip updating the widget.
+ * Updates the hidden `schema_yaml` widget from the node's current editor state.
+ * Non-fatal: any errors are swallowed to avoid breaking the UI loop.
  */
 export function syncYamlWidget(node) {
   try {
@@ -29,30 +27,65 @@ export function syncYamlWidget(node) {
     const w = getSchemaYamlWidget(node);
     if (w) w.value = dumpYamlish(doc);
   } catch (_) {
-    // Non-fatal; schema_yaml is debug/output only
+    // Intentionally non-fatal.
   }
 }
 
 /**
- * Commit an existing (possibly mutated) state object onto the node, sync widgets, and redraw.
+ * Commits an editor state to the node:
+ *  - setState(node, state)
+ *  - syncYamlWidget(node)
+ *  - node.setDirtyCanvas(true, true)
+ *
+ * Returns the committed state (so call sites can do: state = commitState(node, state))
  */
-export function commitState(node, state) {
+export function commitState(node, state, opts = {}) {
+  const { syncYaml = true, dirty = true } = opts;
+
   setState(node, state);
-  syncYamlWidget(node);
 
-  // LiteGraph nodes expose setDirtyCanvas; safe-guard just in case
-  try {
-    node?.setDirtyCanvas?.(true, true);
-  } catch (_) {
-    // ignore
+  if (syncYaml) {
+    syncYamlWidget(node);
   }
+
+  if (dirty && typeof node?.setDirtyCanvas === "function") {
+    node.setDirtyCanvas(true, true);
+  }
+
+  return state;
 }
 
 /**
- * Replace current editor state with a new object and commit it.
- * Returns the new state for convenience.
+ * Convenience helper:
+ * - pulls current state
+ * - calls `mutate(state)` (you mutate in-place)
+ * - commits the result
+ *
+ * Returns the committed state.
  */
-export function commitNewState(node, newState) {
-  commitState(node, newState);
-  return newState;
+export function withState(node, mutate, opts = {}) {
+  const state = getState(node);
+  try {
+    mutate?.(state);
+  } finally {
+    commitState(node, state, opts);
+  }
+  return state;
+}
+
+/**
+ * Convenience helper to replace state with a fresh state object and redraw.
+ *
+ * Returns the committed state.
+ */
+export function replaceState(node, nextState, opts = {}) {
+  return commitState(node, nextState, opts);
+}
+
+/**
+ * Optional alias to make intent explicit at call sites.
+ * (If your editor imports commitNewState, point it here.)
+ */
+export function commitNewState(node, nextState, opts = {}) {
+  return commitState(node, nextState, opts);
 }

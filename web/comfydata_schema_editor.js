@@ -35,7 +35,6 @@ import {
   safeGetJson,
   safePostJson,
   getState,
-  setState,
   defaultState,
   getSchemaYamlWidget,
   buildDocFromState,
@@ -46,7 +45,6 @@ import {
   getFieldByPath,
   getFieldsListAtPath,
   newPlaceholderField,
-  syncYamlWidget,
   commitState,
   commitNewState,
 } from "./functions/index.js";
@@ -168,8 +166,8 @@ app.registerExtension({
             h: UI.rowH,
           };
           drawButton(ctx, addRect.x, addRect.y, addRect.w, addRect.h, "+ Add field");
-
           this._comfydata_hits.rows.push({ kind: "add_child", parentPath: row.parentPath, depth, addRect });
+
           ry += UI.rowH + 6;
           continue;
         }
@@ -186,6 +184,7 @@ app.registerExtension({
           const childCount = Array.isArray(f.fields) ? f.fields.length : 0;
           valuesText = `${caret} ${childCount} field${childCount === 1 ? "" : "s"}`;
         }
+
         drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
         drawX(ctx, delRect.x, delRect.y, delRect.w, delRect.h);
 
@@ -231,10 +230,14 @@ app.registerExtension({
         state = commitNewState(this, defaultState());
       };
 
-
       const doSaveAs = () => {
         const anchorRect =
-          hits?.header?.schemaName || { x: UI.pad + 180, y: UI.pad + 3, w: this.size[0] - UI.pad * 2 - 180, h: UI.btnH };
+          hits?.header?.schemaName || {
+            x: UI.pad + 180,
+            y: UI.pad + 3,
+            w: this.size[0] - UI.pad * 2 - 180,
+            h: UI.btnH,
+          };
 
         beginInlineEdit(this, anchorRect, state.schema_name || "", (val) => {
           const name = (val || "").trim();
@@ -243,13 +246,14 @@ app.registerExtension({
           void (async () => {
             const doc = buildDocFromState(state);
             const resp = await safePostJson("/comfydata/schema/save", { name, doc });
+
             if (!resp.ok) {
               showToast(this, resp.error || "Save failed", "error", hits?.header?.schemaName);
               return;
             }
 
             state.schema_name = name;
-            state = commitNewState(this, defaultState());
+            state = commitState(this, state);
             showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
           })();
         });
@@ -269,7 +273,7 @@ app.registerExtension({
           return;
         }
 
-        commitState(this, state);
+        state = commitState(this, state);
         showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
       };
 
@@ -296,16 +300,16 @@ app.registerExtension({
             }
 
             const newState = docToState(resp.doc);
-            setState(this, newState);
-            syncYamlWidget();
-            this.setDirtyCanvas(true, true);
+            state = commitNewState(this, newState);
           },
           e
         );
       };
 
       const startInlineEditForFieldName = (fieldPath, fallbackRect) => {
-        const rowHit = (this._comfydata_hits?.rows || []).find((r) => r.kind === "field" && r.pathKey === pathKey(fieldPath));
+        const rowHit = (this._comfydata_hits?.rows || []).find(
+          (r) => r.kind === "field" && r.pathKey === pathKey(fieldPath)
+        );
         const nameRect = rowHit?.nameRect || fallbackRect;
 
         setTimeout(() => {
@@ -323,14 +327,14 @@ app.registerExtension({
               f.name = name;
             }
 
-            commitState(this, state);
+            state = commitState(this, state);
           });
         }, 0);
       };
 
       const doAddRootField = () => {
         state.fields.push(newPlaceholderField());
-        commitState(this, state);
+        state = commitState(this, state);
 
         const idx = state.fields.length - 1;
         const fieldPath = [idx];
@@ -353,7 +357,7 @@ app.registerExtension({
       if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
         beginInlineEdit(this, hits.header.schemaName, state.schema_name || "", (val) => {
           state.schema_name = (val || "").trim();
-          commitState(this, state);
+          state = commitState(this, state);
         });
         stop();
         return true;
@@ -398,7 +402,7 @@ app.registerExtension({
             parent.fields.push(newPlaceholderField());
             parent.expanded = true;
 
-            commitState(this, state);
+            state = commitState(this, state);
 
             const newIdx = parent.fields.length - 1;
             const newPath = row.parentPath.concat([newIdx]);
@@ -424,7 +428,8 @@ app.registerExtension({
           const idx = row.path[row.path.length - 1];
           const list = getFieldsListAtPath(state, parentPath);
           if (Array.isArray(list) && idx >= 0 && idx < list.length) list.splice(idx, 1);
-          commitState(this, state);
+
+          state = commitState(this, state);
           stop();
           return true;
         }
@@ -432,7 +437,7 @@ app.registerExtension({
         if (row.nameRect && hit(local, row.nameRect)) {
           beginInlineEdit(this, row.nameRect, f.name || "", (val) => {
             f.name = (val || "").trim();
-            commitState(this, state);
+            state = commitState(this, state);
           });
           stop();
           return true;
@@ -460,12 +465,12 @@ app.registerExtension({
                   beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
                     f.values_csv = normalizeValuesToCsv(val);
                     if (!f.values_csv.trim()) delete f.values_csv;
-                    commitState(this, state);
+                    state = commitState(this, state);
                   });
                 }, 0);
               }
 
-              commitState(this, state);
+              state = commitState(this, state);
             },
             e
           );
@@ -478,7 +483,7 @@ app.registerExtension({
             beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
               f.values_csv = normalizeValuesToCsv(val);
               if (!f.values_csv.trim()) delete f.values_csv;
-              commitState(this, state);
+              state = commitState(this, state);
             });
             stop();
             return true;
@@ -486,7 +491,7 @@ app.registerExtension({
 
           if (f.type === "object") {
             toggleObjectExpanded(f);
-            commitState(this, state);
+            state = commitState(this, state);
             stop();
             return true;
           }
