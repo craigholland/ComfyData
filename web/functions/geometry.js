@@ -1,8 +1,22 @@
-function getCanvasElement() {
+// ComfyData – Canvas Geometry Helpers
+//
+// Purpose:
+// - Translate node-local rects into screen-space rects.
+// - Provide a reliable way to position HTML overlays (inputs/textareas) on top
+//   of the LiteGraph canvas.
+//
+// Notes:
+// - ComfyUI uses LiteGraph with a pan/zoom transform. We read those from
+//   app.canvas.ds (offset + scale).
+// - Rects passed into toScreenRect() are in node-local canvas coordinates.
+
+import { app } from "../../../scripts/app.js";
+
+export function getCanvasElement() {
   return app?.canvas?.canvas || app?.canvas?.canvas_element || null;
 }
 
-function toScreenRect(node, rect) {
+export function toScreenRect(node, rect) {
   const gc = app?.canvas;
   const canvasEl = getCanvasElement();
   if (!gc || !canvasEl) return null;

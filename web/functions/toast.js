@@ -1,17 +1,18 @@
-// ComfyData - Toast Notifications
+// ComfyData – Toast Notifications
 //
-// Responsibility:
-// - Show non-blocking, in-canvas feedback messages (success/error/info).
-// - Anchor near a node-local rect (e.g. schema chip), auto-dismiss, click-to-dismiss.
+// Purpose:
+// - Show non-blocking feedback anchored near the node UI (success/error/info).
+// - Keep user flow in-context without modal dialogs.
 //
 // Notes:
-// - Active toast element stored on node._comfydata_toast_el.
-// - Designed to replace alert/prompt-style UX interruptions.
-//
-// Exports:
-// - showToast(node, message, kind, anchorRect, ms)
+// - We attach the toast element to document.body and store a reference on the node
+//   (node._comfydata_toast_el) so we can replace/dismiss cleanly.
+// - Styling aims to be readable on both light and dark backgrounds.
 
-function showToast(node, message, kind = "info", anchorRect = null, ms = 2200) {
+import { UI } from "./constants.js";
+import { getCanvasElement, toScreenRect } from "./geometry.js";
+
+export function showToast(node, message, kind = "info", anchorRect = null, ms = 2200) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
@@ -33,11 +34,9 @@ function showToast(node, message, kind = "info", anchorRect = null, ms = 2200) {
   const el = document.createElement("div");
   el.textContent = String(message ?? "");
 
-  const top = Math.max(6, Math.round(screen.top - 28));
-
   el.style.position = "fixed";
   el.style.left = `${Math.round(screen.left)}px`;
-  el.style.top = `${top}px`; // slightly above the rect
+  el.style.top = `${Math.round(screen.top - 28)}px`; // slightly above the rect
   el.style.maxWidth = `${Math.max(240, Math.round(screen.width))}px`;
   el.style.zIndex = "10000";
   el.style.padding = "6px 10px";

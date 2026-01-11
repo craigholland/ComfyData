@@ -1,22 +1,18 @@
-// ComfyData - Canvas Drawing Primitives
+// ComfyData – Canvas Drawing Primitives
 //
-// Responsibility:
-// - Low-level drawing helpers for consistent node UI rendering.
-// - Button/chip/delete glyph drawing with rounded rects.
+// Purpose:
+// - Provide small, reusable canvas drawing helpers for the Schema Editor UI.
 //
-// Exports:
-// - drawButton(ctx, x, y, w, h, label)
-// - drawChip(ctx, x, y, w, h, text)
-// - drawX(ctx, x, y, w, h)
+// Notes:
+// - These functions intentionally avoid global state.
+// - Styling is kept simple and in one place to keep UX consistent.
 
-function ensureNodeSize(node) {
-  const minW = 560;
-  const minH = 300;
+export function ensureNodeSize(node, minW = 560, minH = 300) {
   node.size[0] = Math.max(node.size[0], minW);
   node.size[1] = Math.max(node.size[1], minH);
 }
 
-function drawButton(ctx, x, y, w, h, label) {
+export function drawButton(ctx, x, y, w, h, label) {
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 6);
@@ -27,11 +23,11 @@ function drawButton(ctx, x, y, w, h, label) {
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.font = "12px sans-serif";
   ctx.textBaseline = "middle";
-  ctx.fillText(label, x + 8, y + h / 2);
+  ctx.fillText(String(label ?? ""), x + 8, y + h / 2);
   ctx.restore();
 }
 
-function drawChip(ctx, x, y, w, h, text) {
+export function drawChip(ctx, x, y, w, h, text) {
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 6);
@@ -42,11 +38,11 @@ function drawChip(ctx, x, y, w, h, text) {
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.font = "12px sans-serif";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, x + 8, y + h / 2);
+  ctx.fillText(String(text ?? ""), x + 8, y + h / 2);
   ctx.restore();
 }
 
-function drawX(ctx, x, y, w, h) {
+export function drawX(ctx, x, y, w, h) {
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 4);

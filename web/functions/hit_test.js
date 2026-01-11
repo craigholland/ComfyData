@@ -1,41 +1,12 @@
-// ComfyData - Hit Testing & Context Menus
+// ComfyData – Hit Testing Helpers
 //
-// Responsibility:
-// - Geometric hit-testing helpers for node-local UI rects.
-// - ContextMenu creation with correct mouse anchoring.
+// Purpose:
+// - Provide lightweight point-in-rect checks for canvas-drawn UI.
 //
 // Notes:
-// - Uses LiteGraph.ContextMenu (global) and LAST_MOUSE_EVENT for anchoring.
-//
-// Exports:
-// - hit(pt, rect)
-// - captureMouseEvent(evt)
-// - makeContextMenu(values, onPick, evt)
+// - All coordinates here are *node-local* coordinates (not screen space).
+// - The Schema Editor stores these rects in node._comfydata_hits.
 
-let LAST_MOUSE_EVENT = null;
-
-function captureMouseEvent(evt) {
-  if (evt && typeof evt.clientX === "number" && typeof evt.clientY === "number") {
-    LAST_MOUSE_EVENT = evt;
-  }
-}
-
-function hit(pt, rect) {
+export function hit(pt, rect) {
   return pt.x >= rect.x && pt.x <= rect.x + rect.w && pt.y >= rect.y && pt.y <= rect.y + rect.h;
-}
-
-function makeContextMenu(values, onPick, evt) {
-  const items = values.map((v) => ({ content: v, value: v }));
-
-  const anchorEvt =
-    evt && typeof evt.clientX === "number" && typeof evt.clientY === "number" ? evt : LAST_MOUSE_EVENT;
-
-  // eslint-disable-next-line no-undef
-  new LiteGraph.ContextMenu(items, {
-    event: anchorEvt || null,
-    callback: (item) => {
-      if (!item) return;
-      onPick(item.value ?? item.content);
-    },
-  });
 }

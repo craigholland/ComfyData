@@ -1,23 +1,25 @@
-// ComfyData - Editor State Model
+// ComfyData – Editor State Utilities
 //
-// Responsibility:
-// - Define default editor state shape and enforce/normalize field structures.
-// - Read/write node.properties.comfydata_state.
+// Purpose:
+// - Define the frontend editor state shape.
+// - Provide normalization helpers so state stays consistent even if older
+//   saved node graphs contain partial/older shapes.
 //
-// Exports:
-// - defaultState()
-// - ensureFieldShape(field)
-// - getState(node)
-// - setState(node, state)
+// Storage:
+// - State is stored on node.properties.comfydata_state.
+//
+// Notes:
+// - These helpers are intentionally “dumb” and synchronous. Validation and
+//   persistence happen elsewhere.
 
-function defaultState() {
+export function defaultState() {
   return {
     schema_name: "",
     fields: [], // field: { name, type, values_csv?, fields?, expanded?, required? }
   };
 }
 
-function ensureFieldShape(f) {
+export function ensureFieldShape(f) {
   if (!f || typeof f !== "object") return { name: "", type: "str" };
   if (typeof f.name !== "string") f.name = "";
   if (typeof f.type !== "string") f.type = "str";
@@ -30,7 +32,7 @@ function ensureFieldShape(f) {
     if (!Array.isArray(f.fields)) f.fields = [];
     if (typeof f.expanded !== "boolean") f.expanded = false;
   } else {
-    // keep schema clean if leaving object
+    // Keep schema clean if leaving object
     delete f.fields;
     delete f.expanded;
   }
@@ -39,7 +41,7 @@ function ensureFieldShape(f) {
   return f;
 }
 
-function getState(node) {
+export function getState(node) {
   if (!node.properties) node.properties = {};
   if (!node.properties.comfydata_state) node.properties.comfydata_state = defaultState();
 
@@ -49,16 +51,15 @@ function getState(node) {
 
   // normalize shape
   s.fields = s.fields.map((f) => ensureFieldShape(f));
-
   return s;
 }
 
-function setState(node, newState) {
+export function setState(node, newState) {
   if (!node.properties) node.properties = {};
   node.properties.comfydata_state = newState;
 }
 
-function getSchemaYamlWidget(node) {
+export function getSchemaYamlWidget(node) {
   if (!node.widgets) return null;
   return node.widgets.find((w) => w && w.name === "schema_yaml") || null;
 }

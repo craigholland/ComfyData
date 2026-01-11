@@ -1,22 +1,21 @@
-// ComfyData - Inline Edit Overlays
+// ComfyData – Inline Editing Overlays
 //
-// Responsibility:
-// - Render and manage temporary DOM overlays (input/textarea) positioned over the canvas.
-// - Commit/cancel flows (Enter/Esc, Ctrl/Cmd+Enter for textarea), and cleanup on blur.
+// Purpose:
+// - Provide HTML input/textarea overlays anchored to canvas-drawn rectangles.
+// - Replace disruptive modal dialogs (prompt/alert) with inline, in-context edits.
 //
-// Notes:
-// - Overlays are stored on node._comfydata_inline_input for lifecycle management.
-// - Positioning uses graph-to-screen coordinate transforms via app.canvas.ds.
-//
-// Exports:
-// - beginInlineEdit(node, rect, initialValue, onCommit)
-// - beginInlineEditTextarea(node, rect, initialValue, onCommit)
-// - normalizeValuesToCsv(text)
+// UX:
+// - input: Enter commits, Esc cancels, blur commits.
+// - textarea: Ctrl/Cmd+Enter commits, Esc cancels, blur commits.
+// - Overlays are removed automatically and the node is dirtied for redraw.
 
-function beginInlineEdit(node, rect, initialValue, onCommit) {
+import { getCanvasElement, toScreenRect } from "./geometry.js";
+
+export function beginInlineEdit(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
+  // Remove any prior editor owned by this node
   if (node._comfydata_inline_input) {
     try {
       node._comfydata_inline_input.remove();
@@ -51,7 +50,10 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
     } catch (_) {}
     if (node._comfydata_inline_input === input) node._comfydata_inline_input = null;
 
-    if (commit) onCommit?.(input.value);
+    if (commit) {
+      const v = input.value;
+      onCommit?.(v);
+    }
     node.setDirtyCanvas(true, true);
   };
 
@@ -76,26 +78,7 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   }, 0);
 }
 
-function normalizeValuesToCsv(text) {
-  const raw = String(text ?? "");
-  const parts = raw
-    .split(/[,|\n]/g)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const seen = new Set();
-  const out = [];
-  for (const p of parts) {
-    const key = p.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(p);
-  }
-
-  return out.join(", ");
-}
-
-function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
+export function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
@@ -161,4 +144,23 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
     ta.focus();
     ta.select();
   }, 0);
+}
+
+export function normalizeValuesToCsv(text) {
+  const raw = String(text ?? "");
+  const parts = raw
+    .split(/[,|\n]/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+
+  return out.join(", ");
 }

@@ -1,64 +1,69 @@
-// ComfyData - API Helpers
+// ComfyData – API Helpers
 //
-// Responsibility:
-// - Provide safe JSON GET/POST wrappers for ComfyData backend routes.
-// - Normalize network/HTTP/JSON errors into a consistent shape.
+// Purpose:
+// - Provide small, consistent wrappers around fetch() for the ComfyData backend.
+// - Normalize error handling into a single { ok, error, ... } shape.
 //
-// Contract:
-// - Returns: { ok: true, ...data } or { ok: false, error: string }
-// - Never throws (call sites can be simple).
-//
-// Exports:
-// - apiGetJson(path)
-// - apiPostJson(path, body)
+// Design:
+// - We always attempt to parse JSON if possible.
+// - Network/HTTP/JSON errors become: { ok: false, error: <string> }
+// - Successful responses return the parsed JSON (unchanged) if it already has
+//   an ok flag, otherwise we wrap: { ok: true, data: <json> }
 
-export async function apiGetJson(path) {
+async function parseJsonSafely(res) {
   try {
-    const res = await fetch(path, { method: "GET" });
-
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status} ${res.statusText}` };
-    }
-
-    let data;
-    try {
-      data = await res.json();
-    } catch (e) {
-      return { ok: false, error: "Invalid JSON response" };
-    }
-
-    // If backend already returns { ok: false, error }, preserve it.
-    if (data && typeof data === "object" && "ok" in data) return data;
-
-    return { ok: true, ...data };
-  } catch (err) {
-    return { ok: false, error: err?.message || String(err) };
+    return await res.json();
+  } catch (_) {
+    return null;
   }
 }
 
-export async function apiPostJson(path, body) {
+function normalizeError(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (err?.message) return String(err.message);
+  try {
+    return JSON.stringify(err);
+  } catch (_) {
+    return String(err);
+  }
+}
+
+export async function safeGetJson(path) {
+  try {
+    const res = await fetch(path, { method: "GET" });
+    const body = await parseJsonSafely(res);
+
+    if (!res.ok) {
+      return { ok: false, error: body?.error || body?.message || `${res.status} ${res.statusText}` };
+    }
+
+    // backend convention: { ok: true, ... }
+    if (body && typeof body === "object" && "ok" in body) return body;
+
+    return { ok: true, data: body };
+  } catch (err) {
+    return { ok: false, error: normalizeError(err) };
+  }
+}
+
+export async function safePostJson(path, payload) {
   try {
     const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
+      body: JSON.stringify(payload ?? {}),
     });
+    const body = await parseJsonSafely(res);
 
     if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status} ${res.statusText}` };
+      return { ok: false, error: body?.error || body?.message || `${res.status} ${res.statusText}` };
     }
 
-    let data;
-    try {
-      data = await res.json();
-    } catch (e) {
-      return { ok: false, error: "Invalid JSON response" };
-    }
+    if (body && typeof body === "object" && "ok" in body) return body;
 
-    if (data && typeof data === "object" && "ok" in data) return data;
-
-    return { ok: true, ...data };
+    return { ok: true, data: body };
   } catch (err) {
-    return { ok: false, error: err?.message || String(err) };
+    return { ok: false, error: normalizeError(err) };
   }
 }

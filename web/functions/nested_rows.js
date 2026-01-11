@@ -1,21 +1,21 @@
-// ComfyData - Nested Object Field Helpers
+// ComfyData – Nested Object Row Helpers
 //
-// Responsibility:
-// - Path-based addressing for nested schema object fields.
-// - Flatten nested fields into a render list (rows) with indentation depth.
-// - Add/remove/lookup helpers used by UI actions.
+// Purpose:
+// - Support Phase D nested object rendering and edits by:
+//   - Flattening nested field trees into a linear row list for drawing.
+//   - Resolving fields by path (array of indexes) for stable hit testing.
 //
-// Exports:
-// - pathKey(path)
-// - getFieldByPath(state, path)
-// - getFieldsListAtPath(state, parentPath)
-// - flattenRows(fields, depth, basePath)
+// Notes:
+// - Paths are arrays of indices, e.g. [0,2,1] meaning:
+//     root.fields[0].fields[2].fields[1]
 
-function pathKey(path) {
+import { ensureFieldShape } from "./state.js";
+
+export function pathKey(path) {
   return (path || []).join(".");
 }
 
-function getFieldByPath(state, path) {
+export function getFieldByPath(state, path) {
   let list = state.fields;
   let cur = null;
 
@@ -24,34 +24,34 @@ function getFieldByPath(state, path) {
     if (!Array.isArray(list) || idx < 0 || idx >= list.length) return null;
 
     cur = ensureFieldShape(list[idx]);
-
     if (i === path.length - 1) return cur;
 
+    // descend
     if (cur.type !== "object") return null;
     if (!Array.isArray(cur.fields)) cur.fields = [];
     list = cur.fields;
   }
-
   return cur;
 }
 
-function getFieldsListAtPath(state, parentPath) {
+export function getFieldsListAtPath(state, parentPath) {
   // parentPath points to an object field; its children live in that field.fields
   if (!parentPath || parentPath.length === 0) return state.fields;
+
   const parent = getFieldByPath(state, parentPath);
-  if (!parent) return null;
-  if (parent.type !== "object") return null;
+  if (!parent || parent.type !== "object") return null;
   if (!Array.isArray(parent.fields)) parent.fields = [];
   return parent.fields;
 }
 
-function flattenRows(fields, depth = 0, basePath = []) {
+export function flattenRows(fields, depth = 0, basePath = []) {
   const out = [];
   const list = Array.isArray(fields) ? fields : [];
 
   for (let i = 0; i < list.length; i++) {
     const f = ensureFieldShape(list[i]);
     const p = basePath.concat([i]);
+
     out.push({ kind: "field", path: p, depth, field: f });
 
     if (f.type === "object" && f.expanded) {
@@ -64,6 +64,6 @@ function flattenRows(fields, depth = 0, basePath = []) {
   return out;
 }
 
-function newPlaceholderField() {
+export function newPlaceholderField() {
   return ensureFieldShape({ name: "", type: "str" });
 }
