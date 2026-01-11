@@ -46,6 +46,9 @@ import {
   getFieldByPath,
   getFieldsListAtPath,
   newPlaceholderField,
+  syncYamlWidget,
+  commitState,
+  commitNewState,
 } from "./functions/index.js";
 
 app.registerExtension({
@@ -206,7 +209,7 @@ app.registerExtension({
     proto.onMouseDown = function (e, pos) {
       if (this.flags?.collapsed) return origOnMouseDown?.apply(this, arguments);
 
-      const state = getState(this);
+      let state = getState(this);
       const hits = this._comfydata_hits || {};
       const btns = hits.buttons || {};
 
@@ -219,32 +222,15 @@ app.registerExtension({
       }
       const local = { x: lx, y: ly };
 
-      const syncYamlWidget = () => {
-        try {
-          const doc = buildDocFromState(getState(this));
-          const w = getSchemaYamlWidget(this);
-          if (w) w.value = dumpYamlish(doc);
-        } catch (_) {
-          // non-fatal
-        }
-      };
-
       const stop = () => {
         e?.stopPropagation?.();
         e?.preventDefault?.();
       };
 
-      const commitState = () => {
-        setState(this, state);
-        syncYamlWidget();
-        this.setDirtyCanvas(true, true);
+      const doNew = () => {
+        state = commitNewState(this, defaultState());
       };
 
-      const doNew = () => {
-        setState(this, defaultState());
-        syncYamlWidget();
-        this.setDirtyCanvas(true, true);
-      };
 
       const doSaveAs = () => {
         const anchorRect =
@@ -263,7 +249,7 @@ app.registerExtension({
             }
 
             state.schema_name = name;
-            commitState();
+            state = commitNewState(this, defaultState());
             showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
           })();
         });
@@ -283,7 +269,7 @@ app.registerExtension({
           return;
         }
 
-        commitState();
+        commitState(this, state);
         showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
       };
 
@@ -337,14 +323,14 @@ app.registerExtension({
               f.name = name;
             }
 
-            commitState();
+            commitState(this, state);
           });
         }, 0);
       };
 
       const doAddRootField = () => {
         state.fields.push(newPlaceholderField());
-        commitState();
+        commitState(this, state);
 
         const idx = state.fields.length - 1;
         const fieldPath = [idx];
@@ -367,7 +353,7 @@ app.registerExtension({
       if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
         beginInlineEdit(this, hits.header.schemaName, state.schema_name || "", (val) => {
           state.schema_name = (val || "").trim();
-          commitState();
+          commitState(this, state);
         });
         stop();
         return true;
@@ -412,7 +398,7 @@ app.registerExtension({
             parent.fields.push(newPlaceholderField());
             parent.expanded = true;
 
-            commitState();
+            commitState(this, state);
 
             const newIdx = parent.fields.length - 1;
             const newPath = row.parentPath.concat([newIdx]);
@@ -438,7 +424,7 @@ app.registerExtension({
           const idx = row.path[row.path.length - 1];
           const list = getFieldsListAtPath(state, parentPath);
           if (Array.isArray(list) && idx >= 0 && idx < list.length) list.splice(idx, 1);
-          commitState();
+          commitState(this, state);
           stop();
           return true;
         }
@@ -446,7 +432,7 @@ app.registerExtension({
         if (row.nameRect && hit(local, row.nameRect)) {
           beginInlineEdit(this, row.nameRect, f.name || "", (val) => {
             f.name = (val || "").trim();
-            commitState();
+            commitState(this, state);
           });
           stop();
           return true;
@@ -474,12 +460,12 @@ app.registerExtension({
                   beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
                     f.values_csv = normalizeValuesToCsv(val);
                     if (!f.values_csv.trim()) delete f.values_csv;
-                    commitState();
+                    commitState(this, state);
                   });
                 }, 0);
               }
 
-              commitState();
+              commitState(this, state);
             },
             e
           );
@@ -492,7 +478,7 @@ app.registerExtension({
             beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
               f.values_csv = normalizeValuesToCsv(val);
               if (!f.values_csv.trim()) delete f.values_csv;
-              commitState();
+              commitState(this, state);
             });
             stop();
             return true;
@@ -500,7 +486,7 @@ app.registerExtension({
 
           if (f.type === "object") {
             toggleObjectExpanded(f);
-            commitState();
+            commitState(this, state);
             stop();
             return true;
           }
