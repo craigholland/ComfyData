@@ -294,13 +294,13 @@ ComfyData/
 
 ### 11.3 Module Responsibilities
 
-``
+\`\`
 
 - Register node mappings
 - Declare `WEB_DIRECTORY = "./web"`
 - Import API module so routes register on startup
 
-``
+\`\`
 
 - Resolve ComfyUI base directory
 - Define storage locations:
@@ -309,23 +309,23 @@ ComfyData/
 - Ensure directories exist
 - Sanitize schema names for filenames
 
-``
+\`\`
 
 - Read/write schema YAML files
 - Enforce top-level `schema: { name, fields }` structure
 
-``
+\`\`
 
 - Normalize shorthand field definitions
 - Canonicalize field structures
 - Ensure object fields have `fields: {}`
 
-``
+\`\`
 
 - Perform minimal v1 validation
 - Return structured error lists for UI consumption
 
-``
+\`\`
 
 - Register backend HTTP endpoints:
   - list schemas
@@ -335,13 +335,13 @@ ComfyData/
   - check schema existence
 - Constrain filesystem access to user directories
 
-``
+\`\`
 
 - Define the Schema Editor node
 - Hold hidden editor state (JSON or YAML)
 - Output current schema representation
 
-``
+\`\`
 
 - Implement custom canvas-based UI
 - Render field rows and controls
@@ -386,4 +386,60 @@ This state is stored in a hidden node widget or property and is the **single sou
 ---
 
 This implementation plan is intentionally conservative. It prioritizes correctness, clarity, and extensibility over feature breadth and UI polish.
+
+---
+
+## 12. Dev Evolutions
+
+### 12.1 Current State & Near-Term Objectives
+
+This section captures **development milestones achieved so far** and documents the **immediate next steps** as ComfyData evolves from a functional prototype into a more polished and extensible system.
+
+#### Achievements to Date
+
+The following capabilities have been successfully implemented and validated:
+
+- A fully functional **Schema Editor node** rendered in ComfyUI
+- A custom **canvas-based frontend UI layer** (no reliance on default widgets)
+- Inline, in-node editing for:
+  - `schema.name`
+  - field names
+- Reliable mouse event handling with proper propagation control
+- Context-menu–based type selection
+- Backend persistence via HTTP API:
+  - Save / Save As
+  - Load existing schemas
+  - Schema listing
+- Schema round-tripping verified on disk (`schema: { name, fields }`)
+- Internal editor state established as the **single source of truth**
+
+Collectively, these confirm that the architectural approach (custom frontend + thin Python backend) is sound.
+
+---
+
+#### Immediate Objectives (Next Evolution)
+
+The next incremental improvements focus on **UX refinement and capability expansion**, without altering core architecture:
+
+**Phase C.5 – Inline ****\`\`**** Value Editing**
+
+- Replace remaining `prompt()` dialogs with inline textarea overlays
+- Allow editing of `single-select` values directly within the node
+- Normalize entered values (trim, deduplicate, implicit `null` support)
+- Maintain full backward compatibility with existing schemas
+
+---
+
+#### Planned Follow-On Evolutions (When Ready)
+
+These are intentionally deferred until the editor experience is fully solid:
+
+- Inline editing UI for `object` fields (nested schemas)
+- Visual expansion/collapse of object sub-nodes
+- Schema reference (`ref`) fields and override mechanics
+- Cycle detection and prevention logic
+- Instance/data entry nodes that consume schemas
+- Read-only schema graph visualization
+
+Each of these builds directly on the foundation already in place, without requiring architectural rewrites.
 

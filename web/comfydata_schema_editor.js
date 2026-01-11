@@ -1,17 +1,17 @@
 // ComfyData Schema Editor - v1
 //
-// This implements a custom UI layer for the ComfyDataSchemaEditor node.
-// It draws an editor directly on the node canvas and uses backend HTTP endpoints
+// Custom UI layer for ComfyDataSchemaEditor node.
+// Draws editor directly on the node canvas and uses backend HTTP endpoints
 // for schema persistence.
 //
-// Endpoints (already implemented in Python):
+// Endpoints (implemented in Python):
 //   GET  /comfydata/schemas
 //   GET  /comfydata/schema?name=...
 //   POST /comfydata/schema/save   { name, doc }
 //
 // Notes:
-// - We keep editor state in node.properties.comfydata_state
-// - We keep schema_yaml widget updated with YAML-like text for debugging/output
+// - Editor state stored in node.properties.comfydata_state
+// - schema_yaml widget (hidden) updated with YAML-ish text for debug/output
 
 import { app } from "../../scripts/app.js";
 
@@ -21,7 +21,7 @@ const TARGET_NODE_TYPE = "ComfyDataSchemaEditor";
 const PRIMITIVE_TYPES = ["uuid", "int", "str", "decimal"];
 const FIELD_TYPES = ["uuid", "int", "str", "decimal", "single-select", "object"];
 
-// Basic layout constants (tuned to feel decent; adjust anytime)
+// Layout constants
 const UI = {
   pad: 8,
   rowH: 22,
@@ -36,7 +36,6 @@ const UI = {
 let LAST_MOUSE_EVENT = null;
 
 function captureMouseEvent(evt) {
-  // We need a real DOM MouseEvent with clientX/clientY
   if (evt && typeof evt.clientX === "number" && typeof evt.clientY === "number") {
     LAST_MOUSE_EVENT = evt;
   }
@@ -52,7 +51,7 @@ function defaultState() {
 function getState(node) {
   if (!node.properties) node.properties = {};
   if (!node.properties.comfydata_state) node.properties.comfydata_state = defaultState();
-  // Ensure shape
+
   const s = node.properties.comfydata_state;
   if (!Array.isArray(s.fields)) s.fields = [];
   if (typeof s.schema_name !== "string") s.schema_name = "";
@@ -66,8 +65,7 @@ function setState(node, newState) {
 
 function getSchemaYamlWidget(node) {
   if (!node.widgets) return null;
-  // Hidden widgets still appear in node.widgets
-  return node.widgets.find(w => w && w.name === "schema_yaml") || null;
+  return node.widgets.find((w) => w && w.name === "schema_yaml") || null;
 }
 
 function buildDocFromState(state) {
@@ -80,12 +78,9 @@ function buildDocFromState(state) {
       fields[name] = f.type;
     } else if (f.type === "single-select") {
       const csv = (f.values_csv || "").trim();
-      const values = csv
-        ? csv.split(",").map(x => x.trim()).filter(Boolean)
-        : [];
+      const values = csv ? csv.split(",").map((x) => x.trim()).filter(Boolean) : [];
       fields[name] = { type: "single-select", values };
     } else if (f.type === "object") {
-      // v1: object starts empty; Phase D can add nested editing
       fields[name] = { type: "object", fields: {} };
     }
   }
@@ -107,7 +102,6 @@ function docToState(doc) {
   if (fields && typeof fields === "object") {
     for (const [k, v] of Object.entries(fields)) {
       if (typeof v === "string") {
-        // primitive shorthand
         out.fields.push({ name: k, type: v });
       } else if (v && typeof v === "object") {
         const t = v.type;
@@ -123,8 +117,7 @@ function docToState(doc) {
   return out;
 }
 
-// Very simple YAML-ish dump (good enough for node output/debug).
-// Real persistence uses the JSON doc through /schema/save.
+// YAML-ish dump for output/debug
 function dumpYamlish(doc) {
   const schemaName = doc?.schema?.name ?? "";
   const fields = doc?.schema?.fields ?? {};
@@ -152,8 +145,7 @@ function dumpYamlish(doc) {
 
 async function apiGetJson(path) {
   const res = await fetch(path, { method: "GET" });
-  const j = await res.json();
-  return j;
+  return await res.json();
 }
 
 async function apiPostJson(path, body) {
@@ -162,12 +154,10 @@ async function apiPostJson(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const j = await res.json();
-  return j;
+  return await res.json();
 }
 
 function ensureNodeSize(node) {
-  // Make room for our custom editor UI
   const minW = 520;
   const minH = 260;
   node.size[0] = Math.max(node.size[0], minW);
@@ -212,6 +202,7 @@ function drawX(ctx, x, y, w, h) {
   ctx.fill();
   ctx.strokeStyle = "rgba(255,80,80,0.26)";
   ctx.stroke();
+
   ctx.strokeStyle = "rgba(255,255,255,0.75)";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -228,12 +219,10 @@ function hit(pt, rect) {
 }
 
 function makeContextMenu(values, onPick, evt) {
-  const items = values.map(v => ({ content: v, value: v }));
+  const items = values.map((v) => ({ content: v, value: v }));
 
   const anchorEvt =
-    (evt && typeof evt.clientX === "number" && typeof evt.clientY === "number")
-      ? evt
-      : LAST_MOUSE_EVENT;
+    evt && typeof evt.clientX === "number" && typeof evt.clientY === "number" ? evt : LAST_MOUSE_EVENT;
 
   // eslint-disable-next-line no-undef
   new LiteGraph.ContextMenu(items, {
@@ -245,33 +234,31 @@ function makeContextMenu(values, onPick, evt) {
   });
 }
 
+// ---------- Inline editing overlay ----------
+
 function getCanvasElement() {
-  // ComfyUI uses a single canvas element for the graph
-  // app.canvas.canvas is the DOM canvas element in most builds
-  return app?.canvas?.canvas || document.querySelector("canvas");
+  // Prefer the actual graph canvas element.
+  // app.canvas.canvas is common. If not present, try canvas_element.
+  return app?.canvas?.canvas || app?.canvas?.canvas_element || null;
 }
 
 function toScreenRect(node, rect) {
-  // Convert a node-local rect to browser screen pixels
-  // We use the graphcanvas transform.
   const gc = app?.canvas;
   const canvasEl = getCanvasElement();
   if (!gc || !canvasEl) return null;
 
-  // In LiteGraph, canvas is transformed by scale/offset
   const scale = gc.ds?.scale ?? 1;
   const offx = gc.ds?.offset?.[0] ?? 0;
   const offy = gc.ds?.offset?.[1] ?? 0;
 
-  // Node local -> graph coords
+  // node-local -> graph coords
   const gx = node.pos[0] + rect.x;
   const gy = node.pos[1] + rect.y;
 
-  // Graph coords -> canvas coords (pixels within canvas)
+  // graph -> canvas pixels
   const cx = (gx + offx) * scale;
   const cy = (gy + offy) * scale;
 
-  // Canvas coords -> screen coords
   const canvasBounds = canvasEl.getBoundingClientRect();
   return {
     left: canvasBounds.left + cx,
@@ -282,11 +269,10 @@ function toScreenRect(node, rect) {
 }
 
 function beginInlineEdit(node, rect, initialValue, onCommit) {
-  // Reuse a single input element per node
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
-  // Kill any existing editor first
+  // Remove existing editor
   if (node._comfydata_inline_input) {
     try { node._comfydata_inline_input.remove(); } catch (_) {}
     node._comfydata_inline_input = null;
@@ -314,7 +300,6 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   input.style.outline = "none";
 
   const finish = (commit) => {
-    // Remove editor
     try { input.remove(); } catch (_) {}
     if (node._comfydata_inline_input === input) node._comfydata_inline_input = null;
 
@@ -340,9 +325,14 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   document.body.appendChild(input);
   node._comfydata_inline_input = input;
 
-  input.focus();
-  input.select();
+  // Ensure focus happens after the click completes
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 0);
 }
+
+// ---------- Extension registration ----------
 
 app.registerExtension({
   name: EXT_NAME,
@@ -356,33 +346,32 @@ app.registerExtension({
     const origOnMouseDown = proto.onMouseDown;
 
     proto.onNodeCreated = function () {
-        // Capture mouse events from the canvas so menus always anchor correctly
-    if (!app?.canvas?._comfydata_mousehook_installed) {
-      app.canvas._comfydata_mousehook_installed = true;
+      // Capture mouse events so menus anchor correctly
+      if (!app?.canvas?._comfydata_mousehook_installed) {
+        app.canvas._comfydata_mousehook_installed = true;
 
-      const oldProcess = app.canvas.processMouseDown;
-      app.canvas.processMouseDown = function (evt) {
-        captureMouseEvent(evt);
-        return oldProcess.apply(this, arguments);
-      };
-    }
+        const oldProcess = app.canvas.processMouseDown;
+        app.canvas.processMouseDown = function (evt) {
+          captureMouseEvent(evt);
+          return oldProcess.apply(this, arguments);
+        };
+      }
 
       const r = origOnNodeCreated?.apply(this, arguments);
 
       ensureNodeSize(this);
 
-      // Initialize state if missing
+      // Initialize state
       getState(this);
-      // Force-hide the schema_yaml widget if ComfyUI still creates one
+
+      // Hide schema_yaml widget if created
       const w = getSchemaYamlWidget(this);
       if (w) {
         w.hidden = true;
         w.type = "hidden";
-        // Prevent it from reserving layout space
         w.computeSize = () => [0, -4];
       }
 
-      // Prepare hit regions cache
       this._comfydata_hits = {
         buttons: {},
         rows: [],
@@ -395,19 +384,17 @@ app.registerExtension({
     proto.onDrawForeground = function (ctx) {
       const r = origOnDrawForeground?.apply(this, arguments);
 
-      // Only draw if not collapsed
       if (this.flags?.collapsed) return r;
 
       ensureNodeSize(this);
 
       const state = getState(this);
 
-      // Work area (inside node)
       const x0 = UI.pad;
       const y0 = UI.pad;
       const w = this.size[0] - UI.pad * 2;
 
-      // Header
+      // Title
       ctx.save();
       ctx.fillStyle = "rgba(255,255,255,0.88)";
       ctx.font = "13px sans-serif";
@@ -421,7 +408,7 @@ app.registerExtension({
       drawChip(ctx, chipRect.x, chipRect.y, chipRect.w, chipRect.h, `schema.name: ${schemaLabel}`);
       this._comfydata_hits.header.schemaName = chipRect;
 
-      // Top buttons
+      // Buttons
       const btnY = y0 + UI.headerH + 4;
       const btnW = 86;
       const gap = 8;
@@ -472,21 +459,12 @@ app.registerExtension({
         drawChip(ctx, nameRect.x, nameRect.y, nameRect.w, nameRect.h, f.name?.trim() || "(name)");
         drawChip(ctx, typeRect.x, typeRect.y, typeRect.w, typeRect.h, f.type || "(type)");
 
-        const valuesText =
-          f.type === "single-select"
-            ? (f.values_csv?.trim() || "(click to set)")
-            : "(n/a)";
+        const valuesText = f.type === "single-select" ? (f.values_csv?.trim() || "(click to set)") : "(n/a)";
         drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
 
         drawX(ctx, delRect.x, delRect.y, delRect.w, delRect.h);
 
-        this._comfydata_hits.rows.push({
-          idx: i,
-          nameRect,
-          typeRect,
-          valsRect,
-          delRect,
-        });
+        this._comfydata_hits.rows.push({ idx: i, nameRect, typeRect, valsRect, delRect });
 
         ry += UI.rowH + 6;
       }
@@ -495,42 +473,25 @@ app.registerExtension({
     };
 
     proto.onMouseDown = function (e, pos, graphcanvas) {
-        captureMouseEvent(e);
-      const r = origOnMouseDown?.apply(this, arguments);
+      captureMouseEvent(e);
 
-      if (this.flags?.collapsed) return r;
+      if (this.flags?.collapsed) {
+        return origOnMouseDown?.apply(this, arguments);
+      }
 
       const state = getState(this);
 
-
-      // In many ComfyUI/LiteGraph builds, `pos` is already node-local.
-      // In others, it's graph coords. We detect which case we're in.
+      // pos -> node-local coords
       let lx = pos[0];
       let ly = pos[1];
 
-      // If the coordinates look like graph-space (far outside node bounds), convert to local.
       if (lx > this.size[0] + 40 || ly > this.size[1] + 40 || lx < -40 || ly < -40) {
         lx = pos[0] - this.pos[0];
         ly = pos[1] - this.pos[1];
       }
 
       const local = { x: lx, y: ly };
-
-
       const hits = this._comfydata_hits || {};
-
-      // Header: schema name edit
-      if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
-          const rect = hits.header.schemaName;
-          beginInlineEdit(this, rect, state.schema_name || "", (val) => {
-            state.schema_name = (val || "").trim();
-            setState(this, state);
-          });
-          return true;
-        }
-
-
-      // Buttons
       const btns = hits.buttons || {};
 
       const syncYamlWidget = () => {
@@ -539,9 +500,12 @@ app.registerExtension({
           const yamlish = dumpYamlish(doc);
           const w = getSchemaYamlWidget(this);
           if (w) w.value = yamlish;
-        } catch (_) {
-          // ignore
-        }
+        } catch (_) {}
+      };
+
+      const stop = () => {
+        e?.stopPropagation?.();
+        e?.preventDefault?.();
       };
 
       const doNew = () => {
@@ -550,53 +514,19 @@ app.registerExtension({
         this.setDirtyCanvas(true, true);
       };
 
-      const doAddField = () => {
-          // Create a placeholder field and immediately edit its name inline.
-          state.fields.push({ name: "", type: "str" });
-          setState(this, state);
-          this.setDirtyCanvas(true, true);
-
-          // Attempt to focus the just-added row's name cell.
-          // It's likely the last row; we’ll compute its expected rect.
-          const idx = state.fields.length - 1;
-
-          // If we have hit rects (drawn this frame), use them; otherwise approximate.
-          const rows = this._comfydata_hits?.rows || [];
-          const rowHit = rows.find(r => r.idx === idx);
-
-          const nameRect = rowHit?.nameRect || {
-            x: UI.pad,
-            y: (UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6) + (idx * (UI.rowH + 6)),
-            w: UI.colNameW,
-            h: UI.rowH,
-          };
-
-          beginInlineEdit(this, nameRect, "", (val) => {
-            const name = (val || "").trim();
-            if (!name) {
-              // If user leaves it blank, remove the placeholder field.
-              state.fields.splice(idx, 1);
-            } else {
-              state.fields[idx].name = name;
-            }
-            setState(this, state);
-            syncYamlWidget();
-          });
-
-          syncYamlWidget();
-        };
-
-
       const doSaveAs = async () => {
+        // Still prompt for now (we can inline this next)
         const name = prompt("Save As (filename identity):", state.schema_name || "");
         if (!name) return;
+
         const doc = buildDocFromState(state);
         const resp = await apiPostJson("/comfydata/schema/save", { name: name.trim(), doc });
+
         if (!resp?.ok) {
           alert(resp?.error || "Save failed");
           return;
         }
-        // Keep schema.name aligned with user expectation
+
         state.schema_name = doc.schema.name || state.schema_name;
         setState(this, state);
         syncYamlWidget();
@@ -609,12 +539,15 @@ app.registerExtension({
           await doSaveAs();
           return;
         }
+
         const doc = buildDocFromState(state);
         const resp = await apiPostJson("/comfydata/schema/save", { name: filename, doc });
+
         if (!resp?.ok) {
           alert(resp?.error || "Save failed");
           return;
         }
+
         syncYamlWidget();
         this.setDirtyCanvas(true, true);
       };
@@ -625,35 +558,88 @@ app.registerExtension({
           alert(list?.error || "Failed to list schemas");
           return;
         }
+
         const schemas = list.schemas || [];
         if (!schemas.length) {
           alert("No schemas found.");
           return;
         }
 
-        // Show context menu of schema names
-        makeContextMenu(schemas, async (picked) => {
-          const resp = await apiGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
-          if (!resp?.ok) {
-            alert(resp?.error || "Load failed");
-            return;
-          }
-          const newState = docToState(resp.doc);
-          setState(this, newState);
-          syncYamlWidget();
-          this.setDirtyCanvas(true, true);
-        }, e);
+        makeContextMenu(
+          schemas,
+          async (picked) => {
+            const resp = await apiGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
+            if (!resp?.ok) {
+              alert(resp?.error || "Load failed");
+              return;
+            }
+
+            const newState = docToState(resp.doc);
+            setState(this, newState);
+            syncYamlWidget();
+            this.setDirtyCanvas(true, true);
+          },
+          e
+        );
       };
 
-      if (btns.new && hit(local, btns.new)) { doNew(); return true; }
-      if (btns.add && hit(local, btns.add)) { doAddField(); return true; }
-      if (btns.saveas && hit(local, btns.saveas)) { void doSaveAs(); return true; }
-      if (btns.save && hit(local, btns.save)) { void doSave(); return true; }
-      if (btns.load && hit(local, btns.load)) { void doLoad(); return true; }
+      const doAddField = () => {
+        // Add placeholder then inline edit its name
+        state.fields.push({ name: "", type: "str" });
+        setState(this, state);
+        syncYamlWidget();
+        this.setDirtyCanvas(true, true);
 
-      // Row interactions
-      const rows = hits.rows || [];
-      for (const row of rows) {
+        const idx = state.fields.length - 1;
+        const rowHit = (this._comfydata_hits?.rows || []).find((r) => r.idx === idx);
+
+        const nameRect =
+          rowHit?.nameRect || {
+            x: UI.pad,
+            y: (UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6) + idx * (UI.rowH + 6),
+            w: UI.colNameW,
+            h: UI.rowH,
+          };
+
+        // Defer so the canvas doesn't steal focus
+        setTimeout(() => {
+          beginInlineEdit(this, nameRect, "", (val) => {
+            const name = (val || "").trim();
+            if (!name) {
+              state.fields.splice(idx, 1);
+            } else {
+              state.fields[idx].name = name;
+            }
+            setState(this, state);
+            syncYamlWidget();
+            this.setDirtyCanvas(true, true);
+          });
+        }, 0);
+      };
+
+      // ---- Handle clicks FIRST ----
+
+      // Schema name
+      if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
+        beginInlineEdit(this, hits.header.schemaName, state.schema_name || "", (val) => {
+          state.schema_name = (val || "").trim();
+          setState(this, state);
+          syncYamlWidget();
+          this.setDirtyCanvas(true, true);
+        });
+        stop();
+        return true;
+      }
+
+      // Buttons
+      if (btns.new && hit(local, btns.new)) { doNew(); stop(); return true; }
+      if (btns.load && hit(local, btns.load)) { void doLoad(); stop(); return true; }
+      if (btns.save && hit(local, btns.save)) { void doSave(); stop(); return true; }
+      if (btns.saveas && hit(local, btns.saveas)) { void doSaveAs(); stop(); return true; }
+      if (btns.add && hit(local, btns.add)) { doAddField(); stop(); return true; }
+
+      // Rows
+      for (const row of (hits.rows || [])) {
         const f = state.fields[row.idx];
 
         if (hit(local, row.delRect)) {
@@ -661,6 +647,7 @@ app.registerExtension({
           setState(this, state);
           syncYamlWidget();
           this.setDirtyCanvas(true, true);
+          stop();
           return true;
         }
 
@@ -669,29 +656,34 @@ app.registerExtension({
             f.name = (val || "").trim();
             setState(this, state);
             syncYamlWidget();
+            this.setDirtyCanvas(true, true);
           });
+          stop();
           return true;
         }
 
-
         if (hit(local, row.typeRect)) {
-          // Show a context menu to pick a type
-          makeContextMenu(FIELD_TYPES, (picked) => {
-            f.type = picked;
+          makeContextMenu(
+            FIELD_TYPES,
+            (picked) => {
+              f.type = picked;
 
-            // If switching away from single-select, clear values
-            if (f.type !== "single-select") delete f.values_csv;
+              // Clear values if leaving single-select
+              if (f.type !== "single-select") delete f.values_csv;
 
-            // If switching to single-select, prompt for values
-            if (f.type === "single-select") {
-              const csv = prompt("single-select values (comma-separated):", f.values_csv || "");
-              if (csv !== null) f.values_csv = csv;
-            }
+              // Prompt values for now if switching to single-select
+              if (f.type === "single-select") {
+                const csv = prompt("single-select values (comma-separated):", f.values_csv || "");
+                if (csv !== null) f.values_csv = csv;
+              }
 
-            setState(this, state);
-            syncYamlWidget();
-            this.setDirtyCanvas(true, true);
-          }, e);
+              setState(this, state);
+              syncYamlWidget();
+              this.setDirtyCanvas(true, true);
+            },
+            e
+          );
+          stop();
           return true;
         }
 
@@ -707,11 +699,13 @@ app.registerExtension({
           } else if (f.type === "object") {
             alert("Object field editing is Phase D (nested fields). For now this is a placeholder.");
           }
+          stop();
           return true;
         }
       }
 
-      return r;
+      // Not handled by us -> pass to default
+      return origOnMouseDown?.apply(this, arguments);
     };
   },
 });
