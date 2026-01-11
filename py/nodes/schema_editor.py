@@ -24,14 +24,9 @@ class ComfyDataSchemaEditor:
     def INPUT_TYPES(cls) -> Dict[str, Any]:
         return {
             "required": {},
-            "optional": {
-                # Hidden editor state manipulated by JS.
-                # For v1 we treat it as a YAML string.
-                "schema_yaml": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "hidden": True,
-                }),
+            "optional": {},
+            "hidden": {
+                "schema_yaml": ("STRING", {"default": ""}),
             },
         }
 
