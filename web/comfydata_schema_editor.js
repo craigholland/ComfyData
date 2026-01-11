@@ -31,6 +31,7 @@ const UI = {
   colTypeW: 110,
   colValsW: 180,
   colRemoveW: 22,
+  indentW: 18, // Phase D: nested object indentation
 };
 
 let LAST_MOUSE_EVENT = null;
@@ -44,8 +45,25 @@ function captureMouseEvent(evt) {
 function defaultState() {
   return {
     schema_name: "",
-    fields: [], // [{ name, type, values_csv? }]
+    fields: [], // field: { name, type, values_csv?, fields?, expanded?, required? }
   };
+}
+
+function ensureFieldShape(f) {
+  if (!f || typeof f !== "object") return { name: "", type: "str" };
+  if (typeof f.name !== "string") f.name = "";
+  if (typeof f.type !== "string") f.type = "str";
+  if (f.type === "single-select" && typeof f.values_csv !== "string") f.values_csv = f.values_csv ?? "";
+  if (f.type === "object") {
+    if (!Array.isArray(f.fields)) f.fields = [];
+    if (typeof f.expanded !== "boolean") f.expanded = false;
+  } else {
+    // keep schema clean if leaving object
+    delete f.fields;
+    delete f.expanded;
+  }
+  if (typeof f.required !== "boolean") f.required = false;
+  return f;
 }
 
 function getState(node) {
@@ -55,6 +73,10 @@ function getState(node) {
   const s = node.properties.comfydata_state;
   if (!Array.isArray(s.fields)) s.fields = [];
   if (typeof s.schema_name !== "string") s.schema_name = "";
+
+  // normalize shape
+  s.fields = s.fields.map((f) => ensureFieldShape(f));
+
   return s;
 }
 
@@ -68,9 +90,10 @@ function getSchemaYamlWidget(node) {
   return node.widgets.find((w) => w && w.name === "schema_yaml") || null;
 }
 
-function buildDocFromState(state) {
+function buildFieldsDocFromList(fieldsList) {
   const fields = {};
-  for (const f of state.fields) {
+  for (const f0 of fieldsList || []) {
+    const f = ensureFieldShape({ ...f0 });
     const name = (f.name || "").trim();
     if (!name) continue;
 
@@ -81,39 +104,60 @@ function buildDocFromState(state) {
       const values = csv ? csv.split(",").map((x) => x.trim()).filter(Boolean) : [];
       fields[name] = { type: "single-select", values };
     } else if (f.type === "object") {
-      fields[name] = { type: "object", fields: {} };
+      fields[name] = { type: "object", fields: buildFieldsDocFromList(f.fields || []) };
     }
   }
+  return fields;
+}
 
+function buildDocFromState(state) {
   return {
     schema: {
       name: (state.schema_name || "").trim(),
-      fields,
+      fields: buildFieldsDocFromList(state.fields),
     },
   };
+}
+
+function docFieldsToStateList(fieldsObj) {
+  const out = [];
+  const fields = fieldsObj || {};
+  if (fields && typeof fields === "object") {
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v === "string") {
+        out.push(ensureFieldShape({ name: k, type: v }));
+      } else if (v && typeof v === "object") {
+        const t = v.type;
+        if (t === "single-select") {
+          const values = Array.isArray(v.values) ? v.values : [];
+          out.push(
+            ensureFieldShape({
+              name: k,
+              type: "single-select",
+              values_csv: values.join(", "),
+            })
+          );
+        } else if (t === "object") {
+          out.push(
+            ensureFieldShape({
+              name: k,
+              type: "object",
+              fields: docFieldsToStateList(v.fields || {}),
+              expanded: false, // collapsed by default on load
+            })
+          );
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function docToState(doc) {
   const out = defaultState();
   const schema = doc?.schema;
   out.schema_name = String(schema?.name || "");
-
-  const fields = schema?.fields || {};
-  if (fields && typeof fields === "object") {
-    for (const [k, v] of Object.entries(fields)) {
-      if (typeof v === "string") {
-        out.fields.push({ name: k, type: v });
-      } else if (v && typeof v === "object") {
-        const t = v.type;
-        if (t === "single-select") {
-          const values = Array.isArray(v.values) ? v.values : [];
-          out.fields.push({ name: k, type: "single-select", values_csv: values.join(", ") });
-        } else if (t === "object") {
-          out.fields.push({ name: k, type: "object" });
-        }
-      }
-    }
-  }
+  out.fields = docFieldsToStateList(schema?.fields || {});
   return out;
 }
 
@@ -122,24 +166,31 @@ function dumpYamlish(doc) {
   const schemaName = doc?.schema?.name ?? "";
   const fields = doc?.schema?.fields ?? {};
   const lines = [];
-  lines.push("schema:");
-  lines.push(`  name: ${schemaName}`);
-  lines.push("  fields:");
-  for (const [k, v] of Object.entries(fields)) {
-    if (typeof v === "string") {
-      lines.push(`    ${k}: ${v}`);
-    } else if (v && typeof v === "object") {
-      lines.push(`    ${k}:`);
-      lines.push(`      type: ${v.type}`);
-      if (v.type === "single-select") {
-        lines.push("      values:");
-        const vals = Array.isArray(v.values) ? v.values : [];
-        for (const item of vals) lines.push(`        - ${item}`);
-      } else if (v.type === "object") {
-        lines.push("      fields: {}");
+
+  function dumpFields(obj, indent) {
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (typeof v === "string") {
+        lines.push(`${" ".repeat(indent)}${k}: ${v}`);
+      } else if (v && typeof v === "object") {
+        lines.push(`${" ".repeat(indent)}${k}:`);
+        lines.push(`${" ".repeat(indent + 2)}type: ${v.type}`);
+        if (v.type === "single-select") {
+          lines.push(`${" ".repeat(indent + 2)}values:`);
+          const vals = Array.isArray(v.values) ? v.values : [];
+          for (const item of vals) lines.push(`${" ".repeat(indent + 4)}- ${item}`);
+        } else if (v.type === "object") {
+          lines.push(`${" ".repeat(indent + 2)}fields:`);
+          dumpFields(v.fields || {}, indent + 4);
+        }
       }
     }
   }
+
+  lines.push("schema:");
+  lines.push(`  name: ${schemaName}`);
+  lines.push("  fields:");
+  dumpFields(fields, 4);
+
   return lines.join("\n");
 }
 
@@ -158,8 +209,8 @@ async function apiPostJson(path, body) {
 }
 
 function ensureNodeSize(node) {
-  const minW = 520;
-  const minH = 260;
+  const minW = 560;
+  const minH = 300;
   node.size[0] = Math.max(node.size[0], minW);
   node.size[1] = Math.max(node.size[1], minH);
 }
@@ -237,8 +288,6 @@ function makeContextMenu(values, onPick, evt) {
 // ---------- Inline editing overlay ----------
 
 function getCanvasElement() {
-  // Prefer the actual graph canvas element.
-  // app.canvas.canvas is common. If not present, try canvas_element.
   return app?.canvas?.canvas || app?.canvas?.canvas_element || null;
 }
 
@@ -272,9 +321,10 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
-  // Remove existing editor
   if (node._comfydata_inline_input) {
-    try { node._comfydata_inline_input.remove(); } catch (_) {}
+    try {
+      node._comfydata_inline_input.remove();
+    } catch (_) {}
     node._comfydata_inline_input = null;
   }
 
@@ -300,7 +350,9 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   input.style.outline = "none";
 
   const finish = (commit) => {
-    try { input.remove(); } catch (_) {}
+    try {
+      input.remove();
+    } catch (_) {}
     if (node._comfydata_inline_input === input) node._comfydata_inline_input = null;
 
     if (commit) {
@@ -325,7 +377,6 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
   document.body.appendChild(input);
   node._comfydata_inline_input = input;
 
-  // Ensure focus happens after the click completes
   setTimeout(() => {
     input.focus();
     input.select();
@@ -334,14 +385,11 @@ function beginInlineEdit(node, rect, initialValue, onCommit) {
 
 function normalizeValuesToCsv(text) {
   const raw = String(text ?? "");
-
-  // split on commas OR newlines
   const parts = raw
     .split(/[,|\n]/g)
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // dedupe while preserving order
   const seen = new Set();
   const out = [];
   for (const p of parts) {
@@ -358,9 +406,10 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
-  // Remove existing editor
   if (node._comfydata_inline_input) {
-    try { node._comfydata_inline_input.remove(); } catch (_) {}
+    try {
+      node._comfydata_inline_input.remove();
+    } catch (_) {}
     node._comfydata_inline_input = null;
   }
 
@@ -370,7 +419,6 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
   const ta = document.createElement("textarea");
   ta.value = initialValue ?? "";
 
-  // size: reuse rect but make it taller (3–4 rows)
   const height = Math.max(60, Math.round(screen.height * 3));
 
   ta.style.position = "fixed";
@@ -390,12 +438,12 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
   ta.style.lineHeight = "16px";
 
   const finish = (commit) => {
-    try { ta.remove(); } catch (_) {}
+    try {
+      ta.remove();
+    } catch (_) {}
     if (node._comfydata_inline_input === ta) node._comfydata_inline_input = null;
 
-    if (commit) {
-      onCommit?.(ta.value);
-    }
+    if (commit) onCommit?.(ta.value);
     node.setDirtyCanvas(true, true);
   };
 
@@ -405,16 +453,12 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
       finish(false);
       return;
     }
-
-    // Let Enter create newlines normally.
-    // Use Ctrl+Enter (or Cmd+Enter) to commit.
     if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
       ev.preventDefault();
       finish(true);
     }
   });
 
-  // blur commits (same behavior as input)
   ta.addEventListener("blur", () => finish(true));
 
   document.body.appendChild(ta);
@@ -424,6 +468,60 @@ function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
     ta.focus();
     ta.select();
   }, 0);
+}
+
+// ---------- Phase D helpers: nested object rows ----------
+
+function pathKey(path) {
+  return (path || []).join(".");
+}
+
+function getFieldsListAtPath(state, parentPath) {
+  // parentPath points to an object field; its children live in that field.fields
+  if (!parentPath || parentPath.length === 0) return state.fields;
+  const parent = getFieldByPath(state, parentPath);
+  if (!parent) return null;
+  if (parent.type !== "object") return null;
+  if (!Array.isArray(parent.fields)) parent.fields = [];
+  return parent.fields;
+}
+
+function getFieldByPath(state, path) {
+  let list = state.fields;
+  let cur = null;
+  for (let i = 0; i < (path || []).length; i++) {
+    const idx = path[i];
+    if (!Array.isArray(list) || idx < 0 || idx >= list.length) return null;
+    cur = list[idx];
+    cur = ensureFieldShape(cur);
+    if (i === path.length - 1) return cur;
+    // descend
+    if (cur.type !== "object") return null;
+    if (!Array.isArray(cur.fields)) cur.fields = [];
+    list = cur.fields;
+  }
+  return cur;
+}
+
+function flattenRows(fields, depth = 0, basePath = []) {
+  const out = [];
+  const list = Array.isArray(fields) ? fields : [];
+  for (let i = 0; i < list.length; i++) {
+    const f = ensureFieldShape(list[i]);
+    const p = basePath.concat([i]);
+    out.push({ kind: "field", path: p, depth, field: f });
+
+    if (f.type === "object" && f.expanded) {
+      out.push(...flattenRows(f.fields || [], depth + 1, p));
+      // Option A: add-child row
+      out.push({ kind: "add_child", parentPath: p, depth: depth + 1 });
+    }
+  }
+  return out;
+}
+
+function newPlaceholderField() {
+  return ensureFieldShape({ name: "", type: "str" });
 }
 
 // ---------- Extension registration ----------
@@ -477,11 +575,9 @@ app.registerExtension({
 
     proto.onDrawForeground = function (ctx) {
       const r = origOnDrawForeground?.apply(this, arguments);
-
       if (this.flags?.collapsed) return r;
 
       ensureNodeSize(this);
-
       const state = getState(this);
 
       const x0 = UI.pad;
@@ -532,33 +628,88 @@ app.registerExtension({
       ctx.textBaseline = "middle";
       ctx.fillText("Field", x0, tableY + UI.rowH / 2);
       ctx.fillText("Type", x0 + UI.colNameW + 10, tableY + UI.rowH / 2);
-      ctx.fillText("Values (single-select)", x0 + UI.colNameW + UI.colTypeW + 20, tableY + UI.rowH / 2);
+      ctx.fillText("Values / Expand", x0 + UI.colNameW + UI.colTypeW + 20, tableY + UI.rowH / 2);
       ctx.restore();
 
-      // Rows
+      // Rows (Phase D: flattened with nesting)
       this._comfydata_hits.rows = [];
       let ry = tableY + UI.rowH + 6;
 
+      const flat = flattenRows(state.fields, 0, []);
       const maxRows = Math.floor((this.size[1] - ry - 10) / (UI.rowH + 6));
-      const rows = state.fields.slice(0, Math.max(maxRows, 0));
+      const rows = flat.slice(0, Math.max(maxRows, 0));
 
       for (let i = 0; i < rows.length; i++) {
-        const f = rows[i];
+        const row = rows[i];
 
-        const nameRect = { x: x0, y: ry, w: UI.colNameW, h: UI.rowH };
+        const depth = row.depth || 0;
+        const indent = depth * UI.indentW;
+
+        const nameRect = { x: x0 + indent, y: ry, w: UI.colNameW - indent, h: UI.rowH };
         const typeRect = { x: x0 + UI.colNameW + 10, y: ry, w: UI.colTypeW, h: UI.rowH };
         const valsRect = { x: x0 + UI.colNameW + UI.colTypeW + 20, y: ry, w: UI.colValsW, h: UI.rowH };
-        const delRect = { x: x0 + UI.colNameW + UI.colTypeW + UI.colValsW + 30, y: ry, w: UI.colRemoveW, h: UI.rowH };
+        const delRect = {
+          x: x0 + UI.colNameW + UI.colTypeW + UI.colValsW + 30,
+          y: ry,
+          w: UI.colRemoveW,
+          h: UI.rowH,
+        };
 
-        drawChip(ctx, nameRect.x, nameRect.y, nameRect.w, nameRect.h, f.name?.trim() || "(name)");
+        if (row.kind === "add_child") {
+          // Option A: "+ add field" row inside object block
+          const addRect = {
+            x: x0 + indent,
+            y: ry,
+            w: (delRect.x - 10) - (x0 + indent),
+            h: UI.rowH,
+          };
+          drawButton(ctx, addRect.x, addRect.y, addRect.w, addRect.h, "+ Add field");
+          // no delete X for add row
+          this._comfydata_hits.rows.push({
+            kind: "add_child",
+            parentPath: row.parentPath,
+            depth,
+            addRect,
+          });
+
+          ry += UI.rowH + 6;
+          continue;
+        }
+
+        // field row
+        const f = row.field;
+
+        // name chip
+        const nameText = f.name?.trim() || "(name)";
+        drawChip(ctx, nameRect.x, nameRect.y, nameRect.w, nameRect.h, nameText);
+
+        // type chip
         drawChip(ctx, typeRect.x, typeRect.y, typeRect.w, typeRect.h, f.type || "(type)");
 
-        const valuesText = f.type === "single-select" ? (f.values_csv?.trim() || "(click to set)") : "(n/a)";
+        // values / expand chip
+        let valuesText = "(n/a)";
+        if (f.type === "single-select") {
+          valuesText = f.values_csv?.trim() || "(click to set)";
+        } else if (f.type === "object") {
+          const caret = f.expanded ? "▾" : "▸";
+          const childCount = Array.isArray(f.fields) ? f.fields.length : 0;
+          valuesText = `${caret} ${childCount} field${childCount === 1 ? "" : "s"}`;
+        }
         drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
 
+        // delete
         drawX(ctx, delRect.x, delRect.y, delRect.w, delRect.h);
 
-        this._comfydata_hits.rows.push({ idx: i, nameRect, typeRect, valsRect, delRect });
+        this._comfydata_hits.rows.push({
+          kind: "field",
+          path: row.path,
+          pathKey: pathKey(row.path),
+          depth,
+          nameRect,
+          typeRect,
+          valsRect,
+          delRect,
+        });
 
         ry += UI.rowH + 6;
       }
@@ -609,7 +760,7 @@ app.registerExtension({
       };
 
       const doSaveAs = async () => {
-        // Still prompt for now (we can inline this next)
+        // Still prompt for now (we can inline this later)
         const name = prompt("Save As (filename identity):", state.schema_name || "");
         if (!name) return;
 
@@ -677,38 +828,60 @@ app.registerExtension({
         );
       };
 
-      const doAddField = () => {
-        // Add placeholder then inline edit its name
-        state.fields.push({ name: "", type: "str" });
-        setState(this, state);
-        syncYamlWidget();
-        this.setDirtyCanvas(true, true);
-
-        const idx = state.fields.length - 1;
-        const rowHit = (this._comfydata_hits?.rows || []).find((r) => r.idx === idx);
-
-        const nameRect =
-          rowHit?.nameRect || {
-            x: UI.pad,
-            y: (UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6) + idx * (UI.rowH + 6),
-            w: UI.colNameW,
-            h: UI.rowH,
-          };
-
-        // Defer so the canvas doesn't steal focus
+      const startInlineEditForFieldName = (fieldPath, fallbackRect) => {
+        // After insertion, find the current hit rect for that path and edit it.
+        const rowHit = (this._comfydata_hits?.rows || []).find(
+          (r) => r.kind === "field" && r.pathKey === pathKey(fieldPath)
+        );
+        const nameRect = rowHit?.nameRect || fallbackRect;
         setTimeout(() => {
           beginInlineEdit(this, nameRect, "", (val) => {
             const name = (val || "").trim();
+            const f = getFieldByPath(state, fieldPath);
+            if (!f) return;
+
+            // if empty -> remove the field
             if (!name) {
-              state.fields.splice(idx, 1);
+              // remove by path
+              const parentPath = fieldPath.slice(0, -1);
+              const idx = fieldPath[fieldPath.length - 1];
+              const list = getFieldsListAtPath(state, parentPath);
+              if (Array.isArray(list) && idx >= 0 && idx < list.length) {
+                list.splice(idx, 1);
+              }
             } else {
-              state.fields[idx].name = name;
+              f.name = name;
             }
+
             setState(this, state);
             syncYamlWidget();
             this.setDirtyCanvas(true, true);
           });
         }, 0);
+      };
+
+      const doAddRootField = () => {
+        state.fields.push(newPlaceholderField());
+        setState(this, state);
+        syncYamlWidget();
+        this.setDirtyCanvas(true, true);
+
+        const idx = state.fields.length - 1;
+        const fieldPath = [idx];
+
+        const fallbackRect = {
+          x: UI.pad,
+          y: UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6 + idx * (UI.rowH + 6),
+          w: UI.colNameW,
+          h: UI.rowH,
+        };
+
+        startInlineEditForFieldName(fieldPath, fallbackRect);
+      };
+
+      const toggleObjectExpanded = (f) => {
+        if (f.type !== "object") return;
+        f.expanded = !f.expanded;
       };
 
       // ---- Handle clicks FIRST ----
@@ -726,18 +899,80 @@ app.registerExtension({
       }
 
       // Buttons
-      if (btns.new && hit(local, btns.new)) { doNew(); stop(); return true; }
-      if (btns.load && hit(local, btns.load)) { void doLoad(); stop(); return true; }
-      if (btns.save && hit(local, btns.save)) { void doSave(); stop(); return true; }
-      if (btns.saveas && hit(local, btns.saveas)) { void doSaveAs(); stop(); return true; }
-      if (btns.add && hit(local, btns.add)) { doAddField(); stop(); return true; }
+      if (btns.new && hit(local, btns.new)) {
+        doNew();
+        stop();
+        return true;
+      }
+      if (btns.load && hit(local, btns.load)) {
+        void doLoad();
+        stop();
+        return true;
+      }
+      if (btns.save && hit(local, btns.save)) {
+        void doSave();
+        stop();
+        return true;
+      }
+      if (btns.saveas && hit(local, btns.saveas)) {
+        void doSaveAs();
+        stop();
+        return true;
+      }
+      if (btns.add && hit(local, btns.add)) {
+        doAddRootField();
+        stop();
+        return true;
+      }
 
       // Rows
-      for (const row of (hits.rows || [])) {
-        const f = state.fields[row.idx];
+      for (const row of hits.rows || []) {
+        if (row.kind === "add_child") {
+          if (row.addRect && hit(local, row.addRect)) {
+            const parent = getFieldByPath(state, row.parentPath);
+            if (!parent || parent.type !== "object") {
+              stop();
+              return true;
+            }
+            if (!Array.isArray(parent.fields)) parent.fields = [];
 
-        if (hit(local, row.delRect)) {
-          state.fields.splice(row.idx, 1);
+            parent.fields.push(newPlaceholderField());
+            parent.expanded = true;
+
+            setState(this, state);
+            syncYamlWidget();
+            this.setDirtyCanvas(true, true);
+
+            const newIdx = parent.fields.length - 1;
+            const newPath = row.parentPath.concat([newIdx]);
+
+            // Use the addRect as a fallback to place the editor roughly correctly
+            const fallbackRect = {
+              x: row.addRect.x,
+              y: row.addRect.y,
+              w: Math.max(40, UI.colNameW - (row.depth * UI.indentW)),
+              h: UI.rowH,
+            };
+
+            startInlineEditForFieldName(newPath, fallbackRect);
+
+            stop();
+            return true;
+          }
+          continue;
+        }
+
+        // field row
+        const f = getFieldByPath(state, row.path);
+        if (!f) continue;
+
+        if (row.delRect && hit(local, row.delRect)) {
+          const parentPath = row.path.slice(0, -1);
+          const idx = row.path[row.path.length - 1];
+          const list = getFieldsListAtPath(state, parentPath);
+          if (Array.isArray(list) && idx >= 0 && idx < list.length) {
+            list.splice(idx, 1);
+          }
           setState(this, state);
           syncYamlWidget();
           this.setDirtyCanvas(true, true);
@@ -745,7 +980,7 @@ app.registerExtension({
           return true;
         }
 
-        if (hit(local, row.nameRect)) {
+        if (row.nameRect && hit(local, row.nameRect)) {
           beginInlineEdit(this, row.nameRect, f.name || "", (val) => {
             f.name = (val || "").trim();
             setState(this, state);
@@ -756,7 +991,7 @@ app.registerExtension({
           return true;
         }
 
-        if (hit(local, row.typeRect)) {
+        if (row.typeRect && hit(local, row.typeRect)) {
           makeContextMenu(
             FIELD_TYPES,
             (picked) => {
@@ -765,22 +1000,31 @@ app.registerExtension({
               // Clear values if leaving single-select
               if (f.type !== "single-select") delete f.values_csv;
 
+              // Clear object children if leaving object
+              if (f.type !== "object") {
+                delete f.fields;
+                delete f.expanded;
+              }
+
+              // If switching to object, init children + collapse by default, then expand (nice UX)
+              if (f.type === "object") {
+                if (!Array.isArray(f.fields)) f.fields = [];
+                if (typeof f.expanded !== "boolean") f.expanded = true;
+              }
+
+              // If switching to single-select, open textarea inline
               if (f.type === "single-select") {
-                  // Open inline textarea over the Values chip for this row
-                  setTimeout(() => {
-                    beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
-                      f.values_csv = normalizeValuesToCsv(val);
+                setTimeout(() => {
+                  beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
+                    f.values_csv = normalizeValuesToCsv(val);
+                    if (!f.values_csv.trim()) delete f.values_csv;
 
-                      // If empty after normalize, just remove it (keeps schema clean)
-                      if (!f.values_csv.trim()) delete f.values_csv;
-
-                      setState(this, state);
-                      syncYamlWidget();
-                      this.setDirtyCanvas(true, true);
-                    });
-                  }, 0);
-                }
-
+                    setState(this, state);
+                    syncYamlWidget();
+                    this.setDirtyCanvas(true, true);
+                  });
+                }, 0);
+              }
 
               setState(this, state);
               syncYamlWidget();
@@ -792,20 +1036,30 @@ app.registerExtension({
           return true;
         }
 
-        if (hit(local, row.valsRect)) {
+        if (row.valsRect && hit(local, row.valsRect)) {
           if (f.type === "single-select") {
-              beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
-                f.values_csv = normalizeValuesToCsv(val);
-                if (!f.values_csv.trim()) delete f.values_csv;
+            beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
+              f.values_csv = normalizeValuesToCsv(val);
+              if (!f.values_csv.trim()) delete f.values_csv;
 
-                setState(this, state);
-                syncYamlWidget();
-                this.setDirtyCanvas(true, true);
-              });
-            }
-        else if (f.type === "object") {
-            alert("Object field editing is Phase D (nested fields). For now this is a placeholder.");
+              setState(this, state);
+              syncYamlWidget();
+              this.setDirtyCanvas(true, true);
+            });
+            stop();
+            return true;
           }
+
+          if (f.type === "object") {
+            toggleObjectExpanded(f);
+            setState(this, state);
+            syncYamlWidget();
+            this.setDirtyCanvas(true, true);
+            stop();
+            return true;
+          }
+
+          // (n/a) for primitives
           stop();
           return true;
         }
