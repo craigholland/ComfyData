@@ -1,3 +1,16 @@
+// ComfyData - Hit Testing & Context Menus
+//
+// Responsibility:
+// - Geometric hit-testing helpers for node-local UI rects.
+// - ContextMenu creation with correct mouse anchoring.
+//
+// Notes:
+// - Uses LiteGraph.ContextMenu (global) and LAST_MOUSE_EVENT for anchoring.
+//
+// Exports:
+// - hit(pt, rect)
+// - captureMouseEvent(evt)
+// - makeContextMenu(values, onPick, evt)
 
 let LAST_MOUSE_EVENT = null;
 

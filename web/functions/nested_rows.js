@@ -1,3 +1,15 @@
+// ComfyData - Nested Object Field Helpers
+//
+// Responsibility:
+// - Path-based addressing for nested schema object fields.
+// - Flatten nested fields into a render list (rows) with indentation depth.
+// - Add/remove/lookup helpers used by UI actions.
+//
+// Exports:
+// - pathKey(path)
+// - getFieldByPath(state, path)
+// - getFieldsListAtPath(state, parentPath)
+// - flattenRows(fields, depth, basePath)
 
 function pathKey(path) {
   return (path || []).join(".");

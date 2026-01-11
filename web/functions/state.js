@@ -1,3 +1,14 @@
+// ComfyData - Editor State Model
+//
+// Responsibility:
+// - Define default editor state shape and enforce/normalize field structures.
+// - Read/write node.properties.comfydata_state.
+//
+// Exports:
+// - defaultState()
+// - ensureFieldShape(field)
+// - getState(node)
+// - setState(node, state)
 
 function defaultState() {
   return {

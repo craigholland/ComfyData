@@ -1,3 +1,14 @@
+// ComfyData - Canvas Drawing Primitives
+//
+// Responsibility:
+// - Low-level drawing helpers for consistent node UI rendering.
+// - Button/chip/delete glyph drawing with rounded rects.
+//
+// Exports:
+// - drawButton(ctx, x, y, w, h, label)
+// - drawChip(ctx, x, y, w, h, text)
+// - drawX(ctx, x, y, w, h)
+
 function ensureNodeSize(node) {
   const minW = 560;
   const minH = 300;

@@ -1,3 +1,17 @@
+// ComfyData - Inline Edit Overlays
+//
+// Responsibility:
+// - Render and manage temporary DOM overlays (input/textarea) positioned over the canvas.
+// - Commit/cancel flows (Enter/Esc, Ctrl/Cmd+Enter for textarea), and cleanup on blur.
+//
+// Notes:
+// - Overlays are stored on node._comfydata_inline_input for lifecycle management.
+// - Positioning uses graph-to-screen coordinate transforms via app.canvas.ds.
+//
+// Exports:
+// - beginInlineEdit(node, rect, initialValue, onCommit)
+// - beginInlineEditTextarea(node, rect, initialValue, onCommit)
+// - normalizeValuesToCsv(text)
 
 function beginInlineEdit(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();

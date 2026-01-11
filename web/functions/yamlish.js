@@ -1,3 +1,13 @@
+// ComfyData - YAML-ish Serialization Helpers
+//
+// Responsibility:
+// - Build/parse schema documents between editor-state and ComfyData's schema YAML model.
+// - Provide a human-readable "YAML-ish" dump for the hidden debug widget.
+//
+// Exports:
+// - buildDocFromState(state)
+// - docToState(doc)
+// - dumpYamlish(doc)
 
 function buildFieldsDocFromList(fieldsList) {
   const fields = {};

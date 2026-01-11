@@ -1,3 +1,15 @@
+// ComfyData - Toast Notifications
+//
+// Responsibility:
+// - Show non-blocking, in-canvas feedback messages (success/error/info).
+// - Anchor near a node-local rect (e.g. schema chip), auto-dismiss, click-to-dismiss.
+//
+// Notes:
+// - Active toast element stored on node._comfydata_toast_el.
+// - Designed to replace alert/prompt-style UX interruptions.
+//
+// Exports:
+// - showToast(node, message, kind, anchorRect, ms)
 
 function showToast(node, message, kind = "info", anchorRect = null, ms = 2200) {
   const canvasEl = getCanvasElement();

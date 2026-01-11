@@ -13,16 +13,22 @@
 // - Editor state stored in node.properties.comfydata_state
 // - schema_yaml widget (hidden) updated with YAML-ish text for debug/output
 
-import { app } from "../../scripts/app.js";
-import { UI, EXT_NAME, TARGET_NODE_TYPE, FIELD_TYPES, PRIMITIVE_TYPES } from "./functions/constants.js";
-import { getState, setState, defaultState, getSchemaYamlWidget } from "./functions/state.js";
-import { safeGetJson, safePostJson } from "./functions/api.js";
-import { buildDocFromState, docToState, dumpYamlish } from "./functions/yamlish.js";
-import { drawButton, drawChip, drawX, ensureNodeSize } from "./functions/draw.js";
-import { hit, makeContextMenu, captureMouseEvent } from "./functions/hit_test.js";
-import { beginInlineEdit, beginInlineEditTextarea, normalizeValuesToCsv } from "./functions/inline_edit.js";
-import { flattenRows, getFieldByPath, getFieldsListAtPath, pathKey, newPlaceholderField } from "./functions/nested_rows.js";
-import { showToast } from "./functions/toast.js";
+import {
+  apiGetJson,
+  apiPostJson,
+  getState,
+  setState,
+  dumpYamlish,
+  drawButton,
+  drawChip,
+  drawX,
+  hit,
+  makeContextMenu,
+  beginInlineEdit,
+  beginInlineEditTextarea,
+  flattenRows,
+  showToast,
+} from "./functions/index.js";
 
 app.registerExtension({
   name: EXT_NAME,
