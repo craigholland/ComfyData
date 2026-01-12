@@ -498,7 +498,6 @@ app.registerExtension({
               }
 
               if (f.type === "ref") {
-                // PR1 minimal UI: manual entry of target schema name.
                 setTimeout(() => {
                   beginInlineEdit(this, row.valsRect, String(f.ref ?? ""), (val) => {
                     f.ref = (val || "").trim();

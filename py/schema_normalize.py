@@ -26,8 +26,6 @@ class NormalizedField:
     # For kind == "object"
     fields: Optional[Dict[str, "NormalizedField"]] = None
     # For kind == "ref"
-    # NOTE: This is a named schema identifier (must correspond to an existing YAML schema file),
-    # but existence validation is performed in schema_validate.py (PR1 Step 3), not here.
     ref: Optional[str] = None
 
 
@@ -91,7 +89,7 @@ def normalize_field(field_def: Any) -> NormalizedField:
          fields:
            color: {type: single-select, values: [...]}
 
-    4) ref (PR1):
+    4) ref:
        address:
          type: ref
          ref: Address
