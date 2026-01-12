@@ -61,3 +61,60 @@ export function drawX(ctx, x, y, w, h) {
   ctx.stroke();
   ctx.restore();
 }
+
+export function drawPort(ctx, x, y, kind = "default", r = 5) {
+  ctx.save();
+
+  // subtle outer ring
+  ctx.beginPath();
+  ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fill();
+
+  // inner fill (same family, different alpha by kind)
+  let fill = "rgba(80,160,255,0.55)";
+  let stroke = "rgba(80,160,255,0.95)";
+  if (kind === "ref") {
+    fill = "rgba(180,120,255,0.55)";
+    stroke = "rgba(180,120,255,0.95)";
+  } else if (kind === "object") {
+    fill = "rgba(80,220,180,0.55)";
+    stroke = "rgba(80,220,180,0.95)";
+  }
+
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+export function drawBezierEdge(ctx, x1, y1, x2, y2, kind = "default") {
+  ctx.save();
+
+  // control points: horizontal curve
+  const dx = Math.max(40, Math.abs(x2 - x1) * 0.5);
+  const c1x = x1 + dx;
+  const c1y = y1;
+  const c2x = x2 - dx;
+  const c2y = y2;
+
+  let stroke = "rgba(255,255,255,0.22)";
+  if (kind === "ref") stroke = "rgba(180,120,255,0.28)";
+  if (kind === "object") stroke = "rgba(80,220,180,0.28)";
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = stroke;
+
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x2, y2);
+  ctx.stroke();
+
+  ctx.restore();
+}
