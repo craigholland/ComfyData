@@ -492,3 +492,74 @@ These are intentionally narrow, focused on robustness and polish rather than new
 
 These keep us on the “UX first” track while preserving the clean separation: **frontend owns ergonomics, backend owns persistence**.
 
+### 12.3 Introduction of Edges Between ComfyData Object Nodes
+
+This section will outline the next step in extending the ComfyData schema graph: introducing edges between the nodes, representing relationships between different schemas. These edges will help visualize the relationships between various objects (e.g., a Person schema referencing an Address schema, or a PersonPhysical schema containing a reference to a Hair schema).
+
+#### Goals for this Phase:
+
+- **Representation of Relationships:**
+
+    - Define how schema relationships are represented as edges between nodes in the ComfyUI canvas.
+
+    - Introduce an intuitive and clear method to create edges between nodes.
+
+- **Types of Edges:**
+
+    - **Direct References:**
+
+      - For example, a field in one schema (Person) can reference another schema (Address).
+
+    - **Field-based Connections:**
+
+      - The connections could be field-based, where fields in one schema are linked to fields in another.
+
+      - This ensures that connections are created from schema fields (e.g., linking the address field in a Person schema to a Address schema).
+
+- **UI Representation:**
+
+  - **Edge Rendering:** Use lines or arrows to represent edges between two nodes.
+
+  - **Interactivity:** Clicking on an edge can highlight the associated nodes, enabling a smooth UX for users to understand the relationships.
+
+  - **Dynamic Creation of Edges:** Implement a method to allow users to create edges between nodes directly within the canvas editor (e.g., via a context menu or drag-and-drop interaction).
+
+#### Technical Considerations:
+
+- **Graph Representation:**
+
+  - **Edges as Graph Data:** Treat edges as part of the graph data, where each edge connects two nodes (schemas) and is defined by its relationship type (reference, dependency, etc.).
+
+  - **Data Model:** Extend the internal schema model to include relationships, storing information about connected nodes and the types of relationships.
+
+- **UI/Interaction:**
+
+  - **Edge Creation UI:** Introduce UI elements (e.g., buttons, context menus) to allow the user to establish edges between schemas.
+
+  - **Clicking on Edges:** When an edge is clicked, it should highlight the connected nodes, providing a better user experience.
+
+#### Implementation Plan:
+
+1. **Backend Model Updates:**
+
+   - Define how edges will be stored in the backend and how they will be linked to schemas.
+
+   - Extend the backend schema model to include relationships between schemas.
+
+2. **Frontend Changes:**
+
+    - Add the ability to visually represent edges between nodes on the canvas.
+
+   - Ensure that clicking on an edge or node highlights the related components and makes the relationship clear to the user.
+
+    - Implement interactive elements to allow users to create edges between nodes.
+
+3. **Persisting Relationships:**
+
+    - When a user creates an edge, ensure that this relationship is persisted in the schema structure and can be saved and loaded back correctly.
+
+4. **Testing & Validation:**
+
+    - Ensure that the edge creation, rendering, and interaction functionalities are fully tested.
+
+    - Test the saving and loading of schemas with edges to ensure data integrity and persistence.
