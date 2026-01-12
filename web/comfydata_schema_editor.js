@@ -99,7 +99,9 @@ app.registerExtension({
 
       // Schema name chip
       const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
-      const chipRect = { x: x0 + 180, y: y0 + 3, w: w - 180, h: UI.btnH };
+
+      const chipWidth = Math.max(0, (w - 180) * 0.65)
+        const chipRect = { x: x0 + 180, y: y0 + 3, w: chipWidth, h: UI.btnH };
       drawChip(ctx, chipRect.x, chipRect.y, chipRect.w, chipRect.h, `schema.name: ${schemaLabel}`);
       this._comfydata_hits.header.schemaName = chipRect;
 
