@@ -41,6 +41,14 @@ export function buildFieldsDocFromList(fieldsList) {
 
     if (f.type === "object") {
       fields[name] = { type: "object", fields: buildFieldsDocFromList(f.fields || []) };
+      continue;
+    }
+
+    if (f.type === "ref") {
+      const ref = String(f.ref ?? "").trim();
+      // Keep field even if ref is empty; validation will warn.
+      fields[name] = { type: "ref", ref };
+      continue;
     }
   }
   return fields;
@@ -90,6 +98,18 @@ export function docFieldsToStateList(fieldsObj) {
           expanded: false,
         })
       );
+      continue;
+    }
+
+    if (t === "ref") {
+      out.push(
+        ensureFieldShape({
+          name: k,
+          type: "ref",
+          ref: String(v.ref ?? ""),
+        })
+      );
+      continue;
     }
   }
 
@@ -128,6 +148,8 @@ export function dumpYamlish(doc) {
       } else if (v.type === "object") {
         lines.push(`${" ".repeat(indent + 2)}fields:`);
         dumpFields(v.fields || {}, indent + 4);
+      } else if (v.type === "ref") {
+        lines.push(`${" ".repeat(indent + 2)}ref: ${v.ref ?? ""}`);
       }
     }
   }

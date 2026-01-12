@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional
 
 
 PrimitiveType = Literal["uuid", "int", "str", "decimal"]
-FieldKind = Literal["primitive", "single-select", "object"]
+FieldKind = Literal["primitive", "single-select", "object", "ref"]
 
 
 ALLOWED_PRIMITIVES: set[str] = {"uuid", "int", "str", "decimal"}
-ALLOWED_COMPLEX: set[str] = {"single-select", "object"}
+ALLOWED_COMPLEX: set[str] = {"single-select", "object", "ref"}
 
 
 class SchemaNormalizeError(Exception):
@@ -25,6 +25,8 @@ class NormalizedField:
     values: Optional[List[Any]] = None
     # For kind == "object"
     fields: Optional[Dict[str, "NormalizedField"]] = None
+    # For kind == "ref"
+    ref: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ def normalize_schema_doc(doc: Dict[str, Any]) -> NormalizedSchema:
     Notes:
     - `null` for single-select is *implicit* and is NOT injected into stored values.
     - We keep values as-is (preserve order), but we remove duplicates while preserving order.
+    - `ref` fields are normalized for shape only (presence/type of `ref`); existence checks occur in validation.
     """
     try:
         schema = doc["schema"]
@@ -85,6 +88,11 @@ def normalize_field(field_def: Any) -> NormalizedField:
          type: object
          fields:
            color: {type: single-select, values: [...]}
+
+    4) ref:
+       address:
+         type: ref
+         ref: Address
     """
     # Primitive shorthand: "int", "uuid", etc.
     if isinstance(field_def, str):
@@ -139,6 +147,13 @@ def normalize_field(field_def: Any) -> NormalizedField:
 
         return NormalizedField(kind="object", fields=nested)
 
+    if t == "ref":
+        ref_name = field_def.get("ref")
+        if not isinstance(ref_name, str) or not ref_name.strip():
+            raise SchemaNormalizeError("ref.ref must be a non-empty string (target schema name).")
+        # Trim whitespace; existence is validated later.
+        return NormalizedField(kind="ref", ref=ref_name.strip())
+
     raise SchemaNormalizeError(f"Unsupported field type '{t}'. Allowed: {sorted(ALLOWED_COMPLEX)}")
 
 
@@ -160,6 +175,7 @@ def _stable_hashable(value: Any) -> Any:
 # Optional helper: normalized -> canonical YAML doc
 # -----------------------------------------------------------------------------
 
+
 def normalized_to_doc(schema: NormalizedSchema) -> Dict[str, Any]:
     """
     Convert a NormalizedSchema back into a canonical schema document dict
@@ -169,7 +185,9 @@ def normalized_to_doc(schema: NormalizedSchema) -> Dict[str, Any]:
     - primitive: "int"
     - single-select: {type: single-select, values: [...]}
     - object: {type: object, fields: {...}}
+    - ref: {type: ref, ref: <SchemaName>}
     """
+
     def field_to_obj(f: NormalizedField) -> Any:
         if f.kind == "primitive":
             if not f.primitive:
@@ -182,6 +200,10 @@ def normalized_to_doc(schema: NormalizedSchema) -> Dict[str, Any]:
             for k, v in (f.fields or {}).items():
                 out[k] = field_to_obj(v)
             return {"type": "object", "fields": out}
+        if f.kind == "ref":
+            if not f.ref or not str(f.ref).strip():
+                raise SchemaNormalizeError("ref field missing ref target")
+            return {"type": "ref", "ref": str(f.ref).strip()}
         raise SchemaNormalizeError(f"Unhandled normalized field kind: {f.kind}")
 
     fields_obj: Dict[str, Any] = {}
