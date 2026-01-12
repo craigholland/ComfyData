@@ -217,16 +217,7 @@ app.registerExtension({
 
         const ownerNodeId = buildOwnerNodeIdFromRow(row, state);
 
-        if (f.type === "object") {
-          const inlineId = buildInlineNodeId(ownerNodeId, fname);
-          if (!inlineId) continue;
-          if (!nodes.has(inlineId)) {
-            // label is canonical path without INLINE:
-            nodes.set(inlineId, { id: inlineId, label: inlineId.slice("INLINE:".length), kind: "inline" });
-          }
-          edges.push({ kind: "object", fromPathKey: pathKey(row.path), toNodeId: inlineId });
-
-        } else if (f.type === "ref") {
+        if (f.type === "ref") {
           const toId = buildSchemaNodeId(f.ref);
           if (!toId) continue;
           if (!nodes.has(toId)) nodes.set(toId, { id: toId, label: toId.slice("SCHEMA:".length), kind: "schema" });
@@ -238,30 +229,38 @@ app.registerExtension({
     }
 
     function layoutGraphPanel({ x, y, w, rowH }, graph) {
-      // returns a map of nodeId -> layout rect + port positions
+      // PR3a (ref-only): layout only ROOT + SCHEMA:* nodes
+      //
+      // Returns: Map(nodeId -> { id, label, kind, rect, inPort, outPort })
+      // Ports are provided for consistent drawing, even if we only use inPort today.
+
       const layout = new Map();
 
-      // stable ordering: ROOT, then inline, then schema refs
-      const root = [];
-      const inline = [];
+      // Build ordered list: ROOT first, then schema nodes sorted by label
+      const ordered = [];
+
+      const root = graph.nodes.get("ROOT");
+      if (root) ordered.push(root);
+
       const schema = [];
-
       for (const n of graph.nodes.values()) {
-        if (n.id === "ROOT") root.push(n);
-        else if (n.id.startsWith("INLINE:")) inline.push(n);
-        else schema.push(n);
+        if (!n || n.id === "ROOT") continue;
+
+        // Only keep named schemas
+        if (typeof n.id === "string" && n.id.startsWith("SCHEMA:")) schema.push(n);
       }
+      schema.sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
+      ordered.push(...schema);
 
-      inline.sort((a, b) => a.label.localeCompare(b.label));
-      schema.sort((a, b) => a.label.localeCompare(b.label));
-
-      const ordered = [...root, ...inline, ...schema];
-
+      // Layout vertically
       let cy = y;
       for (const n of ordered) {
         const rect = { x, y: cy, w, h: rowH };
+
+        // Define consistent in/out ports
         const inPort = { x: x + 8, y: cy + rowH / 2 };
         const outPort = { x: x + w - 8, y: cy + rowH / 2 };
+
         layout.set(n.id, { ...n, rect, inPort, outPort });
         cy += rowH + 6;
       }
@@ -433,10 +432,11 @@ app.registerExtension({
         // PR3a: for object/ref draw an output port on the values chip
         let outPort = null;
         let outPortKind = null;
-        if (f.type === "object" || f.type === "ref") {
-          outPortKind = f.type;
+        if (f.type === "ref") {
+          outPortKind = "ref";
           outPort = { x: valsRect.x + valsRect.w - 10, y: valsRect.y + valsRect.h / 2 };
         }
+
 
         renderRows.push({
           kind: "field",
