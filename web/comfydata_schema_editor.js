@@ -38,7 +38,6 @@ import {
   defaultState,
   getSchemaYamlWidget,
   buildDocFromState,
-  dumpYamlish,
   docToState,
   pathKey,
   flattenRows,

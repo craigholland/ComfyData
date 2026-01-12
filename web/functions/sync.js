@@ -6,11 +6,11 @@
 //     setState() -> syncYamlWidget() -> setDirtyCanvas()
 //
 // What this file DOES
-// - syncs the hidden `schema_yaml` widget (debug/output) from the editor state
-// - provides a single “commit” helper to apply state + redraw
+// - Syncs the hidden `schema_yaml` widget (debug/output) from the editor state
+// - Provides “commit” helpers to apply state + redraw
 //
 // What this file does NOT do
-// - API calls / persistence (that lives in api.js)
+// - API calls / persistence (api.js)
 // - UI drawing / hit-testing (draw.js, hit_test.js, etc.)
 
 import { getState, setState, getSchemaYamlWidget } from "./state.js";
@@ -34,19 +34,17 @@ export function syncYamlWidget(node) {
 /**
  * Commits an editor state to the node:
  *  - setState(node, state)
- *  - syncYamlWidget(node)
- *  - node.setDirtyCanvas(true, true)
+ *  - syncYamlWidget(node)  (optional)
+ *  - node.setDirtyCanvas(true, true) (optional)
  *
- * Returns the committed state (so call sites can do: state = commitState(node, state))
+ * Returns the committed state (handy for call-sites).
  */
 export function commitState(node, state, opts = {}) {
   const { syncYaml = true, dirty = true } = opts;
 
   setState(node, state);
 
-  if (syncYaml) {
-    syncYamlWidget(node);
-  }
+  if (syncYaml) syncYamlWidget(node);
 
   if (dirty && typeof node?.setDirtyCanvas === "function") {
     node.setDirtyCanvas(true, true);
@@ -61,7 +59,7 @@ export function commitState(node, state, opts = {}) {
  * - calls `mutate(state)` (you mutate in-place)
  * - commits the result
  *
- * Returns the committed state.
+ * Useful to reduce repeated boilerplate at call sites.
  */
 export function withState(node, mutate, opts = {}) {
   const state = getState(node);
@@ -75,7 +73,6 @@ export function withState(node, mutate, opts = {}) {
 
 /**
  * Convenience helper to replace state with a fresh state object and redraw.
- *
  * Returns the committed state.
  */
 export function replaceState(node, nextState, opts = {}) {
@@ -83,8 +80,10 @@ export function replaceState(node, nextState, opts = {}) {
 }
 
 /**
- * Optional alias to make intent explicit at call sites.
- * (If your editor imports commitNewState, point it here.)
+ * Alias used by comfydata_schema_editor.js call-sites.
+ * This is intentionally named to match the import in the main file.
+ *
+ * Returns the committed state.
  */
 export function commitNewState(node, nextState, opts = {}) {
   return commitState(node, nextState, opts);

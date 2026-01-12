@@ -20,3 +20,5 @@ export * from "./menu.js";
 export * from "./toast.js";
 export * from "./nested_rows.js";
 export * from "./sync.js";
+export * from "./mouse_capture.js";
+
