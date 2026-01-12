@@ -11,6 +11,8 @@ import {
   drawButton,
   drawChip,
   drawX,
+    drawPort,
+    drawBezierEdge,
   hit,
   makeContextMenu,
   installMouseCaptureHook,
@@ -120,7 +122,7 @@ app.registerExtension({
 
       const r = origOnNodeCreated?.apply(this, arguments);
 
-      ensureNodeSize(this);
+      ensureNodeSize(this, 860, 320);
       getState(this); // init + normalize
 
       const w = getSchemaYamlWidget(this);
@@ -160,6 +162,111 @@ app.registerExtension({
         }
       }
       return parts.join(".");
+    }
+        // PR3a: compute "owner node id" from a row path
+    function buildOwnerNodeIdFromRow(row, state) {
+      // owner node is the containing object (or root schema)
+      // Row path is indices; we translate to names up to parent of field.
+      let fields = state.fields;
+      const parts = [];
+      for (let depth = 0; depth < row.path.length - 1; depth++) {
+        const idx = row.path[depth];
+        const f = (fields && fields[idx]) ? fields[idx] : null;
+        const name = (f?.name || "").trim();
+        if (!name) break;
+        parts.push(name);
+        fields = f?.fields || [];
+      }
+      // root schema node id is constant
+      if (!parts.length) return "ROOT";
+      return `INLINE:${parts.join(".")}`;
+    }
+
+    function buildInlineNodeId(ownerNodeId, fieldName) {
+      const n = String(fieldName || "").trim();
+      if (!n) return null;
+
+      if (ownerNodeId === "ROOT") return `INLINE:${n}`;
+
+      // ownerNodeId is INLINE:prefix
+      const prefix = ownerNodeId.startsWith("INLINE:") ? ownerNodeId.slice("INLINE:".length) : ownerNodeId;
+      return `INLINE:${prefix}.${n}`;
+    }
+
+    function buildSchemaNodeId(schemaName) {
+      const s = String(schemaName || "").trim();
+      return s ? `SCHEMA:${s}` : null;
+    }
+
+    function deriveGraphFromState(state) {
+      // nodes: root + inline objects + referenced schemas
+      const nodes = new Map();
+
+      const rootLabel = String(state.schema_name || "").trim() || "(unnamed)";
+      nodes.set("ROOT", { id: "ROOT", label: rootLabel, kind: "root" });
+
+      const edges = []; // { kind, fromPathKey, toNodeId }
+
+      // Walk flattened rows because it already knows nesting and provides pathKey mappings
+      const flat = flattenRows(state.fields, 0, []);
+      for (const row of flat) {
+        if (row.kind !== "field") continue;
+        const f = row.field;
+        const fname = (f?.name || "").trim();
+        if (!fname) continue;
+
+        const ownerNodeId = buildOwnerNodeIdFromRow(row, state);
+
+        if (f.type === "object") {
+          const inlineId = buildInlineNodeId(ownerNodeId, fname);
+          if (!inlineId) continue;
+          if (!nodes.has(inlineId)) {
+            // label is canonical path without INLINE:
+            nodes.set(inlineId, { id: inlineId, label: inlineId.slice("INLINE:".length), kind: "inline" });
+          }
+          edges.push({ kind: "object", fromPathKey: pathKey(row.path), toNodeId: inlineId });
+
+        } else if (f.type === "ref") {
+          const toId = buildSchemaNodeId(f.ref);
+          if (!toId) continue;
+          if (!nodes.has(toId)) nodes.set(toId, { id: toId, label: toId.slice("SCHEMA:".length), kind: "schema" });
+          edges.push({ kind: "ref", fromPathKey: pathKey(row.path), toNodeId: toId });
+        }
+      }
+
+      return { nodes, edges };
+    }
+
+    function layoutGraphPanel({ x, y, w, rowH }, graph) {
+      // returns a map of nodeId -> layout rect + port positions
+      const layout = new Map();
+
+      // stable ordering: ROOT, then inline, then schema refs
+      const root = [];
+      const inline = [];
+      const schema = [];
+
+      for (const n of graph.nodes.values()) {
+        if (n.id === "ROOT") root.push(n);
+        else if (n.id.startsWith("INLINE:")) inline.push(n);
+        else schema.push(n);
+      }
+
+      inline.sort((a, b) => a.label.localeCompare(b.label));
+      schema.sort((a, b) => a.label.localeCompare(b.label));
+
+      const ordered = [...root, ...inline, ...schema];
+
+      let cy = y;
+      for (const n of ordered) {
+        const rect = { x, y: cy, w, h: rowH };
+        const inPort = { x: x + 8, y: cy + rowH / 2 };
+        const outPort = { x: x + w - 8, y: cy + rowH / 2 };
+        layout.set(n.id, { ...n, rect, inPort, outPort });
+        cy += rowH + 6;
+      }
+
+      return layout;
     }
 
     proto.onDrawForeground = function (ctx) {
@@ -231,34 +338,66 @@ app.registerExtension({
       ctx.fillText("Values / Expand", x0 + UI.colNameW + UI.colTypeW + 20, tableY + UI.rowH / 2);
       ctx.restore();
 
-      // Rows (flattened w/ nesting)
+            // Rows (flattened w/ nesting)
       this._comfydata_hits.rows = [];
       let ry = tableY + UI.rowH + 6;
 
-      const flat = flattenRows(state.fields, 0, []);
+      // PR3a: increase node width to make room for graph panel
+      // (we do it here too because users can resize)
+      ensureNodeSize(this, 860, 320);
 
+      // We build a "render plan" for rows first (layout pass).
+      const flat = flattenRows(state.fields, 0, []);
       const rowStep = UI.rowH + 6;
       const viewportH = Math.max(0, this.size[1] - ry - 10);
       const maxRows = Math.floor(viewportH / rowStep);
 
       const totalRows = flat.length;
       const canScroll = totalRows > maxRows && maxRows > 0;
-
       const maxScrollRow = canScroll ? Math.max(0, totalRows - maxRows) : 0;
 
-      // Clamp state.scroll_row
       const desired = clamp(state.scroll_row || 0, 0, maxScrollRow);
-      if (desired !== state.scroll_row) {
-        state.scroll_row = desired;
-      }
+      if (desired !== state.scroll_row) state.scroll_row = desired;
 
       const start = canScroll ? state.scroll_row : 0;
-      const rows = flat.slice(start, start + Math.max(maxRows, 0));
+      const visibleRows = flat.slice(start, start + Math.max(maxRows, 0));
 
-      // Draw rows
-      for (const row of rows) {
+      // Graph panel sizing/placement (right side)
+      const tableRight =
+        x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
+
+      const panelGap = 18;
+      const panelW = 220;
+      const panelX = Math.max(tableRight + panelGap, this.size[0] - UI.pad - panelW - 14);
+      const panelY = tableY + UI.rowH + 6;
+
+      const graph = deriveGraphFromState(state);
+      const nodeLayout = layoutGraphPanel({ x: panelX, y: panelY, w: panelW, rowH: UI.rowH }, graph);
+
+      // Build renderRows: enough info to draw rows + compute port positions
+      const renderRows = [];
+      for (const row of visibleRows) {
         const depth = row.depth || 0;
         const indent = depth * UI.indentW;
+
+        if (row.kind === "add_child") {
+          const delRect = {
+            x: x0 + UI.colNameW + UI.colTypeW + UI.colValsW + 30,
+            y: ry,
+            w: UI.colRemoveW,
+            h: UI.rowH,
+          };
+          const addRect = {
+            x: x0 + indent,
+            y: ry,
+            w: delRect.x - 10 - (x0 + indent),
+            h: UI.rowH,
+          };
+
+          renderRows.push({ kind: "add_child", row, depth, indent, addRect });
+          ry += rowStep;
+          continue;
+        }
 
         const nameRect = { x: x0 + indent, y: ry, w: UI.colNameW - indent, h: UI.rowH };
         const typeRect = { x: x0 + UI.colNameW + 10, y: ry, w: UI.colTypeW, h: UI.rowH };
@@ -270,23 +409,7 @@ app.registerExtension({
           h: UI.rowH,
         };
 
-        if (row.kind === "add_child") {
-          const addRect = {
-            x: x0 + indent,
-            y: ry,
-            w: delRect.x - 10 - (x0 + indent),
-            h: UI.rowH,
-          };
-          drawButton(ctx, addRect.x, addRect.y, addRect.w, addRect.h, "+ Add field");
-          this._comfydata_hits.rows.push({ kind: "add_child", parentPath: row.parentPath, depth, addRect });
-
-          ry += rowStep;
-          continue;
-        }
-
         const f = row.field;
-        drawChip(ctx, nameRect.x, nameRect.y, nameRect.w, nameRect.h, f.name?.trim() || "(name)");
-        drawChip(ctx, typeRect.x, typeRect.y, typeRect.w, typeRect.h, f.type || "(type)");
 
         let valuesText = "(n/a)";
         if (f.type === "single-select") {
@@ -299,26 +422,108 @@ app.registerExtension({
           const target = String(f.ref ?? "").trim();
           valuesText = target ? `ref: ${target}` : "(click to set)";
         }
+
         const fieldSchemaPath = buildSchemaPathFromRow(row, state);
         if (hasErrorForField(state.validation, fieldSchemaPath)) {
           valuesText = `⚠ ${valuesText}`;
         }
 
-        drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
-        drawX(ctx, delRect.x, delRect.y, delRect.w, delRect.h);
+        const pk = pathKey(row.path);
 
-        this._comfydata_hits.rows.push({
+        // PR3a: for object/ref draw an output port on the values chip
+        let outPort = null;
+        let outPortKind = null;
+        if (f.type === "object" || f.type === "ref") {
+          outPortKind = f.type;
+          outPort = { x: valsRect.x + valsRect.w - 10, y: valsRect.y + valsRect.h / 2 };
+        }
+
+        renderRows.push({
           kind: "field",
-          path: row.path,
-          pathKey: pathKey(row.path),
+          row,
+          f,
           depth,
+          indent,
+          pathKey: pk,
           nameRect,
           typeRect,
           valsRect,
           delRect,
+          valuesText,
+          outPort,
+          outPortKind,
         });
 
         ry += rowStep;
+      }
+
+      // Populate hit table now (needed for onMouseDown)
+      for (const rr of renderRows) {
+        if (rr.kind === "add_child") {
+          this._comfydata_hits.rows.push({
+            kind: "add_child",
+            parentPath: rr.row.parentPath,
+            depth: rr.depth,
+            addRect: rr.addRect,
+          });
+        } else {
+          this._comfydata_hits.rows.push({
+            kind: "field",
+            path: rr.row.path,
+            pathKey: rr.pathKey,
+            depth: rr.depth,
+            nameRect: rr.nameRect,
+            typeRect: rr.typeRect,
+            valsRect: rr.valsRect,
+            delRect: rr.delRect,
+          });
+        }
+      }
+
+      // --- PR3a: draw edges first (behind UI chips) ---
+      for (const e of graph.edges) {
+        // find row port by pathKey
+        const rr = renderRows.find(r => r.kind === "field" && r.pathKey === e.fromPathKey);
+        if (!rr || !rr.outPort) continue;
+
+        const target = nodeLayout.get(e.toNodeId);
+        if (!target) continue;
+
+        drawBezierEdge(ctx, rr.outPort.x, rr.outPort.y, target.inPort.x, target.inPort.y, e.kind);
+      }
+
+      // --- Draw rows/chips/buttons (existing behavior) ---
+      for (const rr of renderRows) {
+        if (rr.kind === "add_child") {
+          drawButton(ctx, rr.addRect.x, rr.addRect.y, rr.addRect.w, rr.addRect.h, "+ Add field");
+          continue;
+        }
+
+        drawChip(ctx, rr.nameRect.x, rr.nameRect.y, rr.nameRect.w, rr.nameRect.h, rr.f.name?.trim() || "(name)");
+        drawChip(ctx, rr.typeRect.x, rr.typeRect.y, rr.typeRect.w, rr.typeRect.h, rr.f.type || "(type)");
+        drawChip(ctx, rr.valsRect.x, rr.valsRect.y, rr.valsRect.w, rr.valsRect.h, rr.valuesText);
+        drawX(ctx, rr.delRect.x, rr.delRect.y, rr.delRect.w, rr.delRect.h);
+
+        if (rr.outPort) {
+          drawPort(ctx, rr.outPort.x, rr.outPort.y, rr.outPortKind);
+        }
+      }
+
+      // --- PR3a: draw graph panel nodes + their ports ---
+      // Panel label
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.font = "12px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Schema Graph", panelX, panelY - 14);
+      ctx.restore();
+
+      for (const n of nodeLayout.values()) {
+        drawChip(ctx, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.label);
+
+        // in/out ports on nodes
+        drawPort(ctx, n.inPort.x, n.inPort.y, "default", 4);
+        drawPort(ctx, n.outPort.x, n.outPort.y, "default", 4);
       }
 
       // Scrollbar (right side)
@@ -329,19 +534,16 @@ app.registerExtension({
         const trackY = tableY + UI.rowH + 6;
         const trackH = viewportH;
 
-        // thumb size proportional to visible content
         const thumbH = Math.max(18, Math.floor((maxRows / totalRows) * trackH));
         const thumbY =
           trackY + Math.floor((state.scroll_row / Math.max(1, maxScrollRow)) * (trackH - thumbH));
 
-        // draw track
         ctx.save();
         ctx.fillStyle = "rgba(255,255,255,0.08)";
         ctx.beginPath();
         ctx.roundRect(trackX, trackY, trackW, trackH, 4);
         ctx.fill();
 
-        // draw thumb
         ctx.fillStyle = "rgba(255,255,255,0.22)";
         ctx.beginPath();
         ctx.roundRect(trackX + 1, thumbY, trackW - 2, thumbH, 4);
