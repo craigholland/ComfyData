@@ -21,7 +21,7 @@ export function drawButton(ctx, x, y, w, h, label) {
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = "12px sans-serif";
+  ctx.font = "9px sans-serif";
   ctx.textBaseline = "middle";
   ctx.fillText(String(label ?? ""), x + 8, y + h / 2);
   ctx.restore();
@@ -36,7 +36,7 @@ export function drawChip(ctx, x, y, w, h, text) {
   ctx.strokeStyle = "rgba(80,160,255,0.28)";
   ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = "12px sans-serif";
+  ctx.font = "11px sans-serif";
   ctx.textBaseline = "middle";
   ctx.fillText(String(text ?? ""), x + 8, y + h / 2);
   ctx.restore();
