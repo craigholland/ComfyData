@@ -1,14 +1,25 @@
 // ComfyData – Schema <-> State Conversion + YAML-ish Debug Dump
-//
-// Purpose:
-// - Convert between the UI editor state (array-of-rows form) and the persisted
-//   schema document shape:
-//     { schema: { name, fields } }
-// - Provide a human-readable "YAML-ish" dump for the hidden schema_yaml widget
-//   (debug/output only; not a strict YAML emitter).
 
 import { PRIMITIVE_TYPES } from "./constants.js";
 import { ensureFieldShape, defaultState } from "./state.js";
+
+function splitValues(csvLike) {
+  const raw = String(csvLike ?? "");
+  const parts = raw
+    .split(/[,|\n]/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
 
 export function buildFieldsDocFromList(fieldsList) {
   const fields = {};
@@ -23,13 +34,7 @@ export function buildFieldsDocFromList(fieldsList) {
     }
 
     if (f.type === "single-select") {
-      const csv = (f.values_csv || "").trim();
-      const values = csv
-        ? csv
-            .split(",")
-            .map((x) => x.trim())
-            .filter(Boolean)
-        : [];
+      const values = splitValues(f.values_csv);
       fields[name] = { type: "single-select", values };
       continue;
     }

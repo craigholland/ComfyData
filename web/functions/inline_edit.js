@@ -4,38 +4,59 @@
 // - Provide HTML input/textarea overlays anchored to canvas-drawn rectangles.
 // - Replace disruptive modal dialogs (prompt/alert) with inline, in-context edits.
 //
-// UX:
-// - input: Enter commits, Esc cancels, blur commits.
-// - textarea: Ctrl/Cmd+Enter commits, Esc cancels, blur commits.
-// - Overlays are removed automatically and the node is dirtied for redraw.
+// Important:
+// - Overlays are wrapped in a container with class "comfydata-inline-editor" so
+//   our mouse-capture hook can reliably detect and prevent LiteGraph from stealing events.
 
 import { getCanvasElement, toScreenRect } from "./geometry.js";
+
+function removePriorEditor(node) {
+  if (node._comfydata_inline_editor) {
+    try {
+      node._comfydata_inline_editor.remove();
+    } catch (_) {}
+    node._comfydata_inline_editor = null;
+  }
+}
+
+function makeWrapper(screen) {
+  const wrap = document.createElement("div");
+  wrap.className = "comfydata-inline-editor";
+  wrap.style.position = "fixed";
+  wrap.style.left = `${Math.round(screen.left)}px`;
+  wrap.style.top = `${Math.round(screen.top)}px`;
+  wrap.style.width = `${Math.round(screen.width)}px`;
+  wrap.style.height = `${Math.round(screen.height)}px`;
+  wrap.style.zIndex = "9999";
+
+  // Make sure pointer events are captured by the overlay
+  wrap.style.pointerEvents = "auto";
+  return wrap;
+}
 
 export function beginInlineEdit(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
-  // Remove any prior editor owned by this node
-  if (node._comfydata_inline_input) {
-    try {
-      node._comfydata_inline_input.remove();
-    } catch (_) {}
-    node._comfydata_inline_input = null;
-  }
+  removePriorEditor(node);
 
   const screen = toScreenRect(node, rect);
   if (!screen) return;
+
+  const wrap = makeWrapper({
+    ...screen,
+    width: Math.max(40, Math.round(screen.width)),
+    height: Math.max(18, Math.round(screen.height)),
+  });
 
   const input = document.createElement("input");
   input.type = "text";
   input.value = initialValue ?? "";
 
-  input.style.position = "fixed";
-  input.style.left = `${Math.round(screen.left)}px`;
-  input.style.top = `${Math.round(screen.top)}px`;
-  input.style.width = `${Math.max(40, Math.round(screen.width))}px`;
-  input.style.height = `${Math.max(18, Math.round(screen.height))}px`;
-  input.style.zIndex = "9999";
+  // Style on input (not wrapper) so focus ring / selection feels normal
+  input.style.width = "100%";
+  input.style.height = "100%";
+  input.style.boxSizing = "border-box";
   input.style.fontSize = "12px";
   input.style.padding = "2px 6px";
   input.style.borderRadius = "6px";
@@ -46,9 +67,9 @@ export function beginInlineEdit(node, rect, initialValue, onCommit) {
 
   const finish = (commit) => {
     try {
-      input.remove();
+      wrap.remove();
     } catch (_) {}
-    if (node._comfydata_inline_input === input) node._comfydata_inline_input = null;
+    if (node._comfydata_inline_editor === wrap) node._comfydata_inline_editor = null;
 
     if (commit) {
       const v = input.value;
@@ -69,8 +90,9 @@ export function beginInlineEdit(node, rect, initialValue, onCommit) {
 
   input.addEventListener("blur", () => finish(true));
 
-  document.body.appendChild(input);
-  node._comfydata_inline_input = input;
+  wrap.appendChild(input);
+  document.body.appendChild(wrap);
+  node._comfydata_inline_editor = wrap;
 
   setTimeout(() => {
     input.focus();
@@ -82,27 +104,24 @@ export function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
   const canvasEl = getCanvasElement();
   if (!canvasEl) return;
 
-  if (node._comfydata_inline_input) {
-    try {
-      node._comfydata_inline_input.remove();
-    } catch (_) {}
-    node._comfydata_inline_input = null;
-  }
+  removePriorEditor(node);
 
   const screen = toScreenRect(node, rect);
   if (!screen) return;
 
+  const height = Math.max(60, Math.round(screen.height * 3));
+  const wrap = makeWrapper({
+    ...screen,
+    width: Math.max(80, Math.round(screen.width)),
+    height,
+  });
+
   const ta = document.createElement("textarea");
   ta.value = initialValue ?? "";
 
-  const height = Math.max(60, Math.round(screen.height * 3));
-
-  ta.style.position = "fixed";
-  ta.style.left = `${Math.round(screen.left)}px`;
-  ta.style.top = `${Math.round(screen.top)}px`;
-  ta.style.width = `${Math.max(80, Math.round(screen.width))}px`;
-  ta.style.height = `${height}px`;
-  ta.style.zIndex = "9999";
+  ta.style.width = "100%";
+  ta.style.height = "100%";
+  ta.style.boxSizing = "border-box";
   ta.style.fontSize = "12px";
   ta.style.padding = "6px 8px";
   ta.style.borderRadius = "8px";
@@ -115,9 +134,9 @@ export function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
 
   const finish = (commit) => {
     try {
-      ta.remove();
+      wrap.remove();
     } catch (_) {}
-    if (node._comfydata_inline_input === ta) node._comfydata_inline_input = null;
+    if (node._comfydata_inline_editor === wrap) node._comfydata_inline_editor = null;
 
     if (commit) onCommit?.(ta.value);
     node.setDirtyCanvas(true, true);
@@ -137,8 +156,9 @@ export function beginInlineEditTextarea(node, rect, initialValue, onCommit) {
 
   ta.addEventListener("blur", () => finish(true));
 
-  document.body.appendChild(ta);
-  node._comfydata_inline_input = ta;
+  wrap.appendChild(ta);
+  document.body.appendChild(wrap);
+  node._comfydata_inline_editor = wrap;
 
   setTimeout(() => {
     ta.focus();

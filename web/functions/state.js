@@ -1,21 +1,12 @@
 // ComfyData – Editor State Utilities
-//
-// Purpose:
-// - Define the frontend editor state shape.
-// - Provide normalization helpers so state stays consistent even if older
-//   saved node graphs contain partial/older shapes.
-//
-// Storage:
-// - State is stored on node.properties.comfydata_state.
-//
-// Notes:
-// - These helpers are intentionally “dumb” and synchronous. Validation and
-//   persistence happen elsewhere.
 
 export function defaultState() {
   return {
     schema_name: "",
     fields: [], // field: { name, type, values_csv?, fields?, expanded?, required? }
+
+    // scrolling (rows) for large schemas/nested objects
+    scroll_row: 0,
   };
 }
 
@@ -32,7 +23,6 @@ export function ensureFieldShape(f) {
     if (!Array.isArray(f.fields)) f.fields = [];
     if (typeof f.expanded !== "boolean") f.expanded = false;
   } else {
-    // Keep schema clean if leaving object
     delete f.fields;
     delete f.expanded;
   }
@@ -49,7 +39,9 @@ export function getState(node) {
   if (!Array.isArray(s.fields)) s.fields = [];
   if (typeof s.schema_name !== "string") s.schema_name = "";
 
-  // normalize shape
+  if (typeof s.scroll_row !== "number" || !Number.isFinite(s.scroll_row)) s.scroll_row = 0;
+  s.scroll_row = Math.max(0, Math.floor(s.scroll_row));
+
   s.fields = s.fields.map((f) => ensureFieldShape(f));
   return s;
 }

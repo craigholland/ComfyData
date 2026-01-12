@@ -1,18 +1,4 @@
 // ComfyData Schema Editor – Frontend Extension
-//
-// Summary
-// - Custom canvas-rendered UI for the ComfyDataSchemaEditor node.
-// - Persists schemas via backend HTTP endpoints.
-// - Stores editor state on node.properties.comfydata_state.
-//
-// Backend Endpoints (Python)
-//   GET  /comfydata/schemas
-//   GET  /comfydata/schema?name=...
-//   POST /comfydata/schema/save   { name, doc }
-//
-// Notes
-// - This file is intentionally “thin”. The heavy lifting lives under ./functions/.
-// - UI elements are drawn on the node canvas and interacted with via hit testing.
 
 import { app } from "../../scripts/app.js";
 
@@ -48,6 +34,10 @@ import {
   commitNewState,
 } from "./functions/index.js";
 
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 app.registerExtension({
   name: EXT_NAME,
 
@@ -58,6 +48,7 @@ app.registerExtension({
     const origOnNodeCreated = proto.onNodeCreated;
     const origOnDrawForeground = proto.onDrawForeground;
     const origOnMouseDown = proto.onMouseDown;
+    const origOnMouseWheel = proto.onMouseWheel;
 
     proto.onNodeCreated = function () {
       installMouseCaptureHook();
@@ -74,7 +65,7 @@ app.registerExtension({
         w.computeSize = () => [0, -4];
       }
 
-      this._comfydata_hits = { buttons: {}, rows: [], header: {} };
+      this._comfydata_hits = { buttons: {}, rows: [], header: {}, scroll: {} };
       return r;
     };
 
@@ -100,8 +91,8 @@ app.registerExtension({
       // Schema name chip
       const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
 
-      const chipWidth = Math.max(0, (w - 180) * 0.65)
-        const chipRect = { x: x0 + 180, y: y0 + 3, w: chipWidth, h: UI.btnH };
+      const chipWidth = Math.max(0, (w - 180) * 0.65);
+      const chipRect = { x: x0 + 180, y: y0 + 3, w: chipWidth, h: UI.btnH };
       drawChip(ctx, chipRect.x, chipRect.y, chipRect.w, chipRect.h, `schema.name: ${schemaLabel}`);
       this._comfydata_hits.header.schemaName = chipRect;
 
@@ -142,9 +133,26 @@ app.registerExtension({
       let ry = tableY + UI.rowH + 6;
 
       const flat = flattenRows(state.fields, 0, []);
-      const maxRows = Math.floor((this.size[1] - ry - 10) / (UI.rowH + 6));
-      const rows = flat.slice(0, Math.max(maxRows, 0));
 
+      const rowStep = UI.rowH + 6;
+      const viewportH = Math.max(0, this.size[1] - ry - 10);
+      const maxRows = Math.floor(viewportH / rowStep);
+
+      const totalRows = flat.length;
+      const canScroll = totalRows > maxRows && maxRows > 0;
+
+      const maxScrollRow = canScroll ? Math.max(0, totalRows - maxRows) : 0;
+
+      // Clamp state.scroll_row
+      const desired = clamp(state.scroll_row || 0, 0, maxScrollRow);
+      if (desired !== state.scroll_row) {
+        state.scroll_row = desired;
+      }
+
+      const start = canScroll ? state.scroll_row : 0;
+      const rows = flat.slice(start, start + Math.max(maxRows, 0));
+
+      // Draw rows
       for (const row of rows) {
         const depth = row.depth || 0;
         const indent = depth * UI.indentW;
@@ -169,7 +177,7 @@ app.registerExtension({
           drawButton(ctx, addRect.x, addRect.y, addRect.w, addRect.h, "+ Add field");
           this._comfydata_hits.rows.push({ kind: "add_child", parentPath: row.parentPath, depth, addRect });
 
-          ry += UI.rowH + 6;
+          ry += rowStep;
           continue;
         }
 
@@ -200,10 +208,77 @@ app.registerExtension({
           delRect,
         });
 
-        ry += UI.rowH + 6;
+        ry += rowStep;
+      }
+
+      // Scrollbar (right side)
+      this._comfydata_hits.scroll = {};
+      if (canScroll) {
+        const trackW = 8;
+        const trackX = this.size[0] - UI.pad - trackW;
+        const trackY = tableY + UI.rowH + 6;
+        const trackH = viewportH;
+
+        // thumb size proportional to visible content
+        const thumbH = Math.max(18, Math.floor((maxRows / totalRows) * trackH));
+        const thumbY =
+          trackY + Math.floor((state.scroll_row / Math.max(1, maxScrollRow)) * (trackH - thumbH));
+
+        // draw track
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.beginPath();
+        ctx.roundRect(trackX, trackY, trackW, trackH, 4);
+        ctx.fill();
+
+        // draw thumb
+        ctx.fillStyle = "rgba(255,255,255,0.22)";
+        ctx.beginPath();
+        ctx.roundRect(trackX + 1, thumbY, trackW - 2, thumbH, 4);
+        ctx.fill();
+        ctx.restore();
+
+        this._comfydata_hits.scroll.trackRect = { x: trackX, y: trackY, w: trackW, h: trackH };
+        this._comfydata_hits.scroll.thumbRect = { x: trackX + 1, y: thumbY, w: trackW - 2, h: thumbH };
+        this._comfydata_hits.scroll.maxScrollRow = maxScrollRow;
       }
 
       return r;
+    };
+
+    proto.onMouseWheel = function (e) {
+      if (this.flags?.collapsed) return origOnMouseWheel?.apply(this, arguments);
+
+      try {
+        const mouse = app?.canvas?.graph_mouse;
+        if (!mouse) return origOnMouseWheel?.apply(this, arguments);
+
+        const lx = mouse[0] - this.pos[0];
+        const ly = mouse[1] - this.pos[1];
+
+        // Only scroll when mouse is over node body
+        if (lx < 0 || ly < 0 || lx > this.size[0] || ly > this.size[1]) {
+          return origOnMouseWheel?.apply(this, arguments);
+        }
+
+        const state = getState(this);
+
+        // we only scroll if scrollbar is relevant (computed last draw)
+        const maxScrollRow = this._comfydata_hits?.scroll?.maxScrollRow ?? 0;
+        if (maxScrollRow <= 0) return origOnMouseWheel?.apply(this, arguments);
+
+        const dir = Math.sign(e?.deltaY || 0);
+        if (dir === 0) return origOnMouseWheel?.apply(this, arguments);
+
+        state.scroll_row = clamp((state.scroll_row || 0) + dir, 0, maxScrollRow);
+        commitState(this, state);
+
+        if (typeof e?.preventDefault === "function") e.preventDefault();
+        if (typeof e?.stopPropagation === "function") e.stopPropagation();
+        return true;
+      } catch (_) {
+        return origOnMouseWheel?.apply(this, arguments);
+      }
     };
 
     proto.onMouseDown = function (e, pos) {
@@ -220,143 +295,20 @@ app.registerExtension({
         lx = pos[0] - this.pos[0];
         ly = pos[1] - this.pos[1];
       }
+
       const local = { x: lx, y: ly };
 
       const stop = () => {
-        e?.stopPropagation?.();
-        e?.preventDefault?.();
+        try {
+          e?.preventDefault?.();
+          e?.stopPropagation?.();
+        } catch (_) {}
       };
 
-      const doNew = () => {
-        state = commitNewState(this, defaultState());
-      };
-
-      const doSaveAs = () => {
-        const anchorRect =
-          hits?.header?.schemaName || {
-            x: UI.pad + 180,
-            y: UI.pad + 3,
-            w: this.size[0] - UI.pad * 2 - 180,
-            h: UI.btnH,
-          };
-
-        beginInlineEdit(this, anchorRect, state.schema_name || "", (val) => {
-          const name = (val || "").trim();
-          if (!name) return;
-
-          void (async () => {
-            const doc = buildDocFromState(state);
-            const resp = await safePostJson("/comfydata/schema/save", { name, doc });
-
-            if (!resp.ok) {
-              showToast(this, resp.error || "Save failed", "error", hits?.header?.schemaName);
-              return;
-            }
-
-            state.schema_name = name;
-            state = commitState(this, state);
-            showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
-          })();
-        });
-      };
-
-      const doSave = async () => {
-        const filename = (state.schema_name || "").trim();
-        if (!filename) {
-          doSaveAs();
-          return;
-        }
-
-        const doc = buildDocFromState(state);
-        const resp = await safePostJson("/comfydata/schema/save", { name: filename, doc });
-        if (!resp.ok) {
-          showToast(this, resp.error || "Save failed", "error", hits?.header?.schemaName);
-          return;
-        }
-
-        state = commitState(this, state);
-        showToast(this, "Saved", "success", hits?.header?.schemaName, 1400);
-      };
-
-      const doLoad = async () => {
-        const list = await safeGetJson("/comfydata/schemas");
-        if (!list.ok) {
-          showToast(this, list.error || "Failed to list schemas", "error", hits?.header?.schemaName);
-          return;
-        }
-
-        const schemas = Array.isArray(list.schemas) ? list.schemas : [];
-        if (!schemas.length) {
-          showToast(this, "No schemas found.", "info", hits?.header?.schemaName);
-          return;
-        }
-
-        makeContextMenu(
-          schemas,
-          async (picked) => {
-            const resp = await safeGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
-            if (!resp.ok) {
-              showToast(this, resp.error || "Schema load failed", "error", hits?.header?.schemaName);
-              return;
-            }
-
-            const newState = docToState(resp.doc);
-            state = commitNewState(this, newState);
-          },
-          e
-        );
-      };
-
-      const startInlineEditForFieldName = (fieldPath, fallbackRect) => {
-        const rowHit = (this._comfydata_hits?.rows || []).find(
-          (r) => r.kind === "field" && r.pathKey === pathKey(fieldPath)
-        );
-        const nameRect = rowHit?.nameRect || fallbackRect;
-
-        setTimeout(() => {
-          beginInlineEdit(this, nameRect, "", (val) => {
-            const name = (val || "").trim();
-            const f = getFieldByPath(state, fieldPath);
-            if (!f) return;
-
-            if (!name) {
-              const parentPath = fieldPath.slice(0, -1);
-              const idx = fieldPath[fieldPath.length - 1];
-              const list = getFieldsListAtPath(state, parentPath);
-              if (Array.isArray(list) && idx >= 0 && idx < list.length) list.splice(idx, 1);
-            } else {
-              f.name = name;
-            }
-
-            state = commitState(this, state);
-          });
-        }, 0);
-      };
-
-      const doAddRootField = () => {
-        state.fields.push(newPlaceholderField());
-        state = commitState(this, state);
-
-        const idx = state.fields.length - 1;
-        const fieldPath = [idx];
-        const fallbackRect = {
-          x: UI.pad,
-          y: UI.pad + UI.headerH + 4 + UI.btnH + 10 + UI.rowH + 6 + idx * (UI.rowH + 6),
-          w: UI.colNameW,
-          h: UI.rowH,
-        };
-        startInlineEditForFieldName(fieldPath, fallbackRect);
-      };
-
-      const toggleObjectExpanded = (f) => {
-        if (f.type !== "object") return;
-        f.expanded = !f.expanded;
-      };
-
-      // ----- Handle clicks first -----
-
-      if (hits.header?.schemaName && hit(local, hits.header.schemaName)) {
-        beginInlineEdit(this, hits.header.schemaName, state.schema_name || "", (val) => {
+      // Header schema.name
+      const schemaNameRect = hits?.header?.schemaName;
+      if (schemaNameRect && hit(local, schemaNameRect)) {
+        beginInlineEdit(this, schemaNameRect, state.schema_name || "", (val) => {
           state.schema_name = (val || "").trim();
           state = commitState(this, state);
         });
@@ -364,57 +316,127 @@ app.registerExtension({
         return true;
       }
 
-      if (btns.new && hit(local, btns.new)) {
-        doNew();
-        stop();
-        return true;
-      }
-      if (btns.load && hit(local, btns.load)) {
-        void doLoad();
-        stop();
-        return true;
-      }
-      if (btns.save && hit(local, btns.save)) {
-        void doSave();
-        stop();
-        return true;
-      }
-      if (btns.saveas && hit(local, btns.saveas)) {
-        doSaveAs();
-        stop();
-        return true;
-      }
-      if (btns.add && hit(local, btns.add)) {
-        doAddRootField();
-        stop();
-        return true;
-      }
+      // Buttons
+      for (const [k, rect] of Object.entries(btns)) {
+        if (!rect) continue;
+        if (!hit(local, rect)) continue;
 
-      for (const row of hits.rows || []) {
-        if (row.kind === "add_child") {
-          if (row.addRect && hit(local, row.addRect)) {
-            const parent = getFieldByPath(state, row.parentPath);
-            if (!parent || parent.type !== "object") {
-              stop();
-              return true;
+        if (k === "new") {
+          state = commitNewState(this, defaultState());
+          showToast("New schema", "info");
+          stop();
+          return true;
+        }
+
+        if (k === "add") {
+          state.fields.push(newPlaceholderField());
+          state = commitState(this, state);
+          stop();
+          return true;
+        }
+
+        if (k === "save") {
+          const doc = buildDocFromState(state);
+          const name = (state.schema_name || "").trim();
+          if (!name) {
+            showToast("schema.name is required", "warn");
+            stop();
+            return true;
+          }
+
+          (async () => {
+            const res = await safePostJson("/comfydata/schema/save", { name, doc });
+            if (!res?.ok) {
+              showToast(res?.error || "Save failed", "error");
+              return;
+            }
+            if (res?.validation && res.validation.ok === false) {
+              showToast(`Saved with ${res.validation.errors?.length || 0} validation warning(s)`, "warn");
+            } else {
+              showToast("Saved", "success");
+            }
+          })();
+
+          stop();
+          return true;
+        }
+
+        if (k === "saveas") {
+          // Save As: let user edit schema.name, then save under that name
+          beginInlineEdit(this, hits?.header?.schemaName, state.schema_name || "", (val) => {
+            const nextName = (val || "").trim();
+            if (!nextName) {
+              showToast("schema.name is required", "warn");
+              return;
             }
 
-            if (!Array.isArray(parent.fields)) parent.fields = [];
-            parent.fields.push(newPlaceholderField());
-            parent.expanded = true;
+            const doc = buildDocFromState({ ...state, schema_name: nextName });
 
+            (async () => {
+              const res = await safePostJson("/comfydata/schema/save", { name: nextName, doc });
+              if (!res?.ok) {
+                showToast(res?.error || "Save As failed", "error");
+                return;
+              }
+
+              // Only update state after successful Save-As
+              state.schema_name = nextName;
+              state = commitState(this, state);
+
+              if (res?.validation && res.validation.ok === false) {
+                showToast(`Saved with ${res.validation.errors?.length || 0} validation warning(s)`, "warn");
+              } else {
+                showToast("Saved As", "success");
+              }
+            })();
+          });
+
+          stop();
+          return true;
+        }
+
+        if (k === "load") {
+          (async () => {
+            const list = await safeGetJson("/comfydata/schemas");
+            if (!list?.ok) {
+              showToast(list?.error || "Load failed", "error");
+              return;
+            }
+            const schemas = list.schemas || [];
+            if (!schemas.length) {
+              showToast("No schemas found", "info");
+              return;
+            }
+
+            makeContextMenu(
+              schemas,
+              async (picked) => {
+                const loaded = await safeGetJson(`/comfydata/schema?name=${encodeURIComponent(picked)}`);
+                if (!loaded?.ok) {
+                  showToast(loaded?.error || "Load failed", "error");
+                  return;
+                }
+                const next = docToState(loaded.doc);
+                state = commitNewState(this, next);
+                showToast(`Loaded: ${picked}`, "success");
+              },
+              e
+            );
+          })();
+
+          stop();
+          return true;
+        }
+      }
+
+      // Rows
+      const rows = hits.rows || [];
+      for (const row of rows) {
+        if (row.kind === "add_child") {
+          if (row.addRect && hit(local, row.addRect)) {
+            const list = getFieldsListAtPath(state, row.parentPath);
+            if (Array.isArray(list)) list.push(newPlaceholderField());
             state = commitState(this, state);
-
-            const newIdx = parent.fields.length - 1;
-            const newPath = row.parentPath.concat([newIdx]);
-            const fallbackRect = {
-              x: row.addRect.x,
-              y: row.addRect.y,
-              w: Math.max(40, UI.colNameW - row.depth * UI.indentW),
-              h: UI.rowH,
-            };
-            startInlineEditForFieldName(newPath, fallbackRect);
-
             stop();
             return true;
           }
@@ -491,7 +513,7 @@ app.registerExtension({
           }
 
           if (f.type === "object") {
-            toggleObjectExpanded(f);
+            f.expanded = !f.expanded;
             state = commitState(this, state);
             stop();
             return true;
