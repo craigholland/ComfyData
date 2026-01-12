@@ -38,6 +38,71 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+async function getSchemasCached(node) {
+  // Cache list on the node instance for 10s to avoid spamming the backend
+  const now = Date.now();
+  const cache = node._comfydata_schema_list_cache;
+  if (cache && (now - cache.ts) < 10_000 && Array.isArray(cache.list)) return cache.list;
+
+  const res = await safeGetJson("/comfydata/schemas");
+  if (!res?.ok) throw new Error(res?.error || "Failed to fetch schemas");
+  const list = Array.isArray(res.schemas) ? res.schemas : [];
+  node._comfydata_schema_list_cache = { ts: now, list };
+  return list;
+}
+
+async function openRefPicker({ node, event, field, rect, state, commit }) {
+  let schemas = [];
+  try {
+    schemas = await getSchemasCached(node);
+  } catch (err) {
+    showToast(String(err?.message || err || "Failed to fetch schemas"), "error");
+    return;
+  }
+
+  // Optional: avoid allowing self-reference to schema.name (can still be validated later)
+  const selfName = String(state.schema_name || "").trim();
+
+  const items = [];
+
+  items.push("(clear)");
+  items.push("(manual entry…)");
+
+  // divider-ish
+  items.push("────────");
+
+  for (const s of schemas) {
+    if (typeof s !== "string") continue;
+    if (selfName && s === selfName) {
+      // allow it if you want; otherwise skip. PR2: keep it allowed and let validation handle cycles later.
+      items.push(s);
+    } else {
+      items.push(s);
+    }
+  }
+
+  makeContextMenu(items, (picked) => {
+    if (picked === "(clear)") {
+      delete field.ref;
+      commit();
+      return;
+    }
+    if (picked === "(manual entry…)") {
+      beginInlineEdit(node, rect, String(field.ref ?? ""), (val) => {
+        field.ref = (val || "").trim();
+        if (!field.ref) delete field.ref;
+        commit();
+      });
+      return;
+    }
+    if (picked === "────────") return;
+
+    field.ref = String(picked || "").trim();
+    if (!field.ref) delete field.ref;
+    commit();
+  }, event);
+}
+
 app.registerExtension({
   name: EXT_NAME,
 
@@ -69,6 +134,34 @@ app.registerExtension({
       return r;
     };
 
+    function hasErrorForField(validation, fieldPathStr) {
+      if (!validation || validation.ok) return false;
+      const errs = validation.errors || [];
+      // We match any error path that starts with the field's path prefix
+      // Example fieldPathStr: "schema.fields.address"
+      return errs.some(e => typeof e.path === "string" && e.path.startsWith(fieldPathStr));
+    }
+
+    function buildSchemaPathFromRow(row, state) {
+      // row.path = indices into nested arrays
+      // We reconstruct names by walking the state lists
+      let fields = state.fields;
+      let parts = ["schema", "fields"];
+      for (let depth = 0; depth < row.path.length; depth++) {
+        const idx = row.path[depth];
+        const f = (fields && fields[idx]) ? fields[idx] : null;
+        const name = (f?.name || "").trim();
+        if (!name) break;
+        parts.push(name);
+        if (depth < row.path.length - 1) {
+          // go into object child list
+          parts.push("fields");
+          fields = f?.fields || [];
+        }
+      }
+      return parts.join(".");
+    }
+
     proto.onDrawForeground = function (ctx) {
       const r = origOnDrawForeground?.apply(this, arguments);
       if (this.flags?.collapsed) return r;
@@ -95,6 +188,16 @@ app.registerExtension({
       const chipRect = { x: x0 + 180, y: y0 + 3, w: chipWidth, h: UI.btnH };
       drawChip(ctx, chipRect.x, chipRect.y, chipRect.w, chipRect.h, `schema.name: ${schemaLabel}`);
       this._comfydata_hits.header.schemaName = chipRect;
+
+      const v = state.validation;
+      const vText = !v ? "Validation: (n/a)"
+          : (v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`);
+
+      const vW = 170;
+      const vX = Math.min(x0 + w - vW, x0 + 180 + chipWidth + 10);
+      const vRect = { x: vX, y: y0 + 3, w: vW, h: UI.btnH };
+      drawChip(ctx, vRect.x, vRect.y, vRect.w, vRect.h, vText);
+      this._comfydata_hits.header.validation = vRect;
 
       // Buttons
       const btnY = y0 + UI.headerH + 4;
@@ -195,6 +298,10 @@ app.registerExtension({
         } else if (f.type === "ref") {
           const target = String(f.ref ?? "").trim();
           valuesText = target ? `ref: ${target}` : "(click to set)";
+        }
+        const fieldSchemaPath = buildSchemaPathFromRow(row, state);
+        if (hasErrorForField(state.validation, fieldSchemaPath)) {
+          valuesText = `⚠ ${valuesText}`;
         }
 
         drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
@@ -319,6 +426,22 @@ app.registerExtension({
         return true;
       }
 
+      const validationRect = hits?.header?.validation;
+      if (validationRect && hit(local, validationRect)) {
+        const v = state.validation;
+        if (!v) {
+          showToast("No validation info yet. Save or Validate.", "info");
+        } else if (v.ok) {
+          showToast("Validation OK", "success");
+        } else {
+          const errs = Array.isArray(v.errors) ? v.errors : [];
+          const preview = errs.slice(0, 4).map(e => `• ${e.path}: ${e.message}`).join("\n");
+          showToast(preview || "Validation issues found", "warn");
+        }
+        stop();
+        return true;
+      }
+
       // Buttons
       for (const [k, rect] of Object.entries(btns)) {
         if (!rect) continue;
@@ -353,6 +476,8 @@ app.registerExtension({
               showToast(res?.error || "Save failed", "error");
               return;
             }
+            state.validation = res?.validation ?? null;
+            state = commitState(this, state);
             if (res?.validation && res.validation.ok === false) {
               showToast(`Saved with ${res.validation.errors?.length || 0} validation warning(s)`, "warn");
             } else {
@@ -384,6 +509,7 @@ app.registerExtension({
 
               // Only update state after successful Save-As
               state.schema_name = nextName;
+              state.validation = res?.validation ?? null;
               state = commitState(this, state);
 
               if (res?.validation && res.validation.ok === false) {
@@ -421,6 +547,8 @@ app.registerExtension({
                 }
                 const next = docToState(loaded.doc);
                 state = commitNewState(this, next);
+                state.validation = null;
+                state = commitState(this, state);
                 showToast(`Loaded: ${picked}`, "success");
               },
               e
@@ -497,15 +625,19 @@ app.registerExtension({
                 }, 0);
               }
 
-              if (f.type === "ref") {
-                setTimeout(() => {
-                  beginInlineEdit(this, row.valsRect, String(f.ref ?? ""), (val) => {
-                    f.ref = (val || "").trim();
-                    if (!f.ref) delete f.ref; // keep state clean
-                    state = commitState(this, state);
-                  });
-                }, 0);
-              }
+               if (f.type === "ref") {
+                 setTimeout(() => {
+                     openRefPicker({
+                      node: this,
+                      event: e,
+                      field: f,
+                      rect: row.valsRect,
+                      state,
+                      commit: () => { state = commitState(this, state); },
+                    });
+                  }, 0);
+                }
+
 
               state = commitState(this, state);
             },
@@ -534,14 +666,18 @@ app.registerExtension({
           }
 
           if (f.type === "ref") {
-            beginInlineEdit(this, row.valsRect, String(f.ref ?? ""), (val) => {
-              f.ref = (val || "").trim();
-              if (!f.ref) delete f.ref;
-              state = commitState(this, state);
-            });
-            stop();
-            return true;
+              openRefPicker({
+                node: this,
+                event: e,
+                field: f,
+                rect: row.valsRect,
+                state,
+                commit: () => { state = commitState(this, state); },
+              });
+              stop();
+              return true;
           }
+
 
           stop();
           return true;

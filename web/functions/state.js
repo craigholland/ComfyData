@@ -7,6 +7,7 @@ export function defaultState() {
 
     // scrolling (rows) for large schemas/nested objects
     scroll_row: 0,
+    validation: null, // { ok: boolean, errors: [{ path, message }] } or null
   };
 }
 
@@ -47,6 +48,8 @@ export function getState(node) {
 
   if (typeof s.scroll_row !== "number" || !Number.isFinite(s.scroll_row)) s.scroll_row = 0;
   s.scroll_row = Math.max(0, Math.floor(s.scroll_row));
+  if (s.validation !== null && typeof s.validation !== "object") s.validation = null;
+  if (s.validation && !Array.isArray(s.validation.errors)) s.validation.errors = [];
 
   s.fields = s.fields.map((f) => ensureFieldShape(f));
   return s;
