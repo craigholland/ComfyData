@@ -12,7 +12,7 @@ export const EXT_NAME = "ComfyData.SchemaEditor";
 export const TARGET_NODE_TYPE = "ComfyDataSchemaEditor";
 
 export const PRIMITIVE_TYPES = ["uuid", "int", "str", "decimal"];
-export const FIELD_TYPES = ["uuid", "int", "str", "decimal", "single-select", "object"];
+export const FIELD_TYPES = ["uuid", "int", "str", "decimal", "single-select", "object", "ref"];
 
 // Layout constants
 export const UI = {

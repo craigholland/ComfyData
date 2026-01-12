@@ -192,6 +192,9 @@ app.registerExtension({
           const caret = f.expanded ? "▾" : "▸";
           const childCount = Array.isArray(f.fields) ? f.fields.length : 0;
           valuesText = `${caret} ${childCount} field${childCount === 1 ? "" : "s"}`;
+        } else if (f.type === "ref") {
+          const target = String(f.ref ?? "").trim();
+          valuesText = target ? `ref: ${target}` : "(click to set)";
         }
 
         drawChip(ctx, valsRect.x, valsRect.y, valsRect.w, valsRect.h, valuesText);
@@ -477,6 +480,7 @@ app.registerExtension({
                 delete f.fields;
                 delete f.expanded;
               }
+              if (f.type !== "ref") delete f.ref;
 
               if (f.type === "object") {
                 if (!Array.isArray(f.fields)) f.fields = [];
@@ -488,6 +492,17 @@ app.registerExtension({
                   beginInlineEditTextarea(this, row.valsRect, f.values_csv || "", (val) => {
                     f.values_csv = normalizeValuesToCsv(val);
                     if (!f.values_csv.trim()) delete f.values_csv;
+                    state = commitState(this, state);
+                  });
+                }, 0);
+              }
+
+              if (f.type === "ref") {
+                // PR1 minimal UI: manual entry of target schema name.
+                setTimeout(() => {
+                  beginInlineEdit(this, row.valsRect, String(f.ref ?? ""), (val) => {
+                    f.ref = (val || "").trim();
+                    if (!f.ref) delete f.ref; // keep state clean
                     state = commitState(this, state);
                   });
                 }, 0);
@@ -515,6 +530,16 @@ app.registerExtension({
           if (f.type === "object") {
             f.expanded = !f.expanded;
             state = commitState(this, state);
+            stop();
+            return true;
+          }
+
+          if (f.type === "ref") {
+            beginInlineEdit(this, row.valsRect, String(f.ref ?? ""), (val) => {
+              f.ref = (val || "").trim();
+              if (!f.ref) delete f.ref;
+              state = commitState(this, state);
+            });
             stop();
             return true;
           }

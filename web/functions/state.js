@@ -3,7 +3,7 @@
 export function defaultState() {
   return {
     schema_name: "",
-    fields: [], // field: { name, type, values_csv?, fields?, expanded?, required? }
+    fields: [], // field: { name, type, values_csv?, fields?, expanded?, required?, ref? }
 
     // scrolling (rows) for large schemas/nested objects
     scroll_row: 0,
@@ -25,6 +25,12 @@ export function ensureFieldShape(f) {
   } else {
     delete f.fields;
     delete f.expanded;
+  }
+
+  if (f.type === "ref") {
+    if (typeof f.ref !== "string") f.ref = f.ref ?? "";
+  } else {
+    delete f.ref;
   }
 
   if (typeof f.required !== "boolean") f.required = false;
