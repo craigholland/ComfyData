@@ -12,7 +12,8 @@ import {
   drawChip,
   drawX,
   drawPort,
-  drawBezierEdge,
+  drawBezierEdge, 
+  drawCheckbox,
   hit,
   makeContextMenu,
   installMouseCaptureHook,
@@ -312,38 +313,49 @@ app.registerExtension({
       }
 
       // ─────────────────────────────────────────────────────────────
-      // Row 2: schema.name + validation chips (compact)
+      // Row 2: schema.name chip
       // ─────────────────────────────────────────────────────────────
       const chipY = btnY + btnH + 6;
       const chipH = btnH; // match button height
-
+      
       const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
-
-      const v = state.validation;
-      const vText = !v ? "Validation: (n/a)" : v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`;
-
-      // We want compact chips, not “eat the row” chips.
-      // We’ll cap schema chip width and ensure validation is always visible.
-      const vW = 150; // smaller than your 170
-      const chipGap = 8;
-      const schemaMinW = 220;
-      const schemaMaxW = 360; // hard cap so it doesn't dominate
-
-      const schemaW = Math.max(schemaMinW, Math.min(schemaMaxW, w - vW - chipGap));
-
-      const schemaRect = { x: x0, y: chipY, w: schemaW, h: chipH };
-      drawChip(ctx, schemaRect.x, schemaRect.y, schemaRect.w, schemaRect.h, `schema.name: ${schemaLabel}`);
+      const chipW = 180;
+      const schemaRect = { x: x0, y: chipY, w: chipW, h: chipH };
+      drawChip(
+        ctx,
+        schemaRect.x,
+        schemaRect.y,
+        schemaRect.w,
+        schemaRect.h,
+        `schema.name: ${schemaLabel}`
+      );
       this._comfydata_hits.header.schemaName = schemaRect;
 
-      const vX = schemaRect.x + schemaRect.w + chipGap;
-      const vRect = { x: vX, y: chipY, w: Math.max(90, w - (vX - x0)), h: chipH };
+      // ─────────────────────────────────────────────────────────────
+      // Row 3: validation chip (next row, fixed width 180)
+      // ─────────────────────────────────────────────────────────────
+      const v = state.validation;
+      const vText = !v
+        ? "Validation: (n/a)"
+        : (v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`);
+
+      const validationY = chipY + chipH + 6;
+      const vRect = { x: x0, y: validationY, w: chipW, h: chipH };
       drawChip(ctx, vRect.x, vRect.y, vRect.w, vRect.h, vText);
       this._comfydata_hits.header.validation = vRect;
 
       // ─────────────────────────────────────────────────────────────
+      // Row 4: Display Schema Graph checkbox (default off)
+      // ─────────────────────────────────────────────────────────────
+      const cbY = validationY + chipH + 6;
+      const cbRect = { x: x0, y: cbY, w: chipW, h: chipH };
+      drawCheckbox(ctx, cbRect, !!state.display_graph, "Display Schema Graph");
+      this._comfydata_hits.header.displayGraph = cbRect;
+
+      // ─────────────────────────────────────────────────────────────
       // Table header (tight, based on UI constants)
       // ─────────────────────────────────────────────────────────────
-      const tableY = chipY + chipH + 10;
+      const tableY = cbY + chipH + 10;
 
       ctx.save();
       ctx.fillStyle = "rgba(255,255,255,0.55)";
@@ -380,14 +392,18 @@ app.registerExtension({
 
       // Graph panel sizing/placement (right side)
       const tableRight = x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
-
-      const panelGap = 18;
+      const panelGap = 80; // reduce whitespace between table and graph
       const panelW = 190;
-      const panelX = Math.max(tableRight + panelGap, this.size[0] - UI.pad - panelW - 14);
+      const preferredPanelX = tableRight + panelGap;
+      const maxPanelX = this.size[0] - UI.pad - panelW - 14;
+      const panelX = Math.min(preferredPanelX, maxPanelX);
       const panelY = tableY + UI.rowH + 6;
 
-      const graph = deriveGraphFromState(state);
-      const nodeLayout = layoutGraphPanel({ x: panelX, y: panelY, w: panelW, rowH: UI.rowH }, graph);
+      const showGraph = !!state.display_graph;
+      const graph = showGraph ? deriveGraphFromState(state) : null;
+      const nodeLayout = showGraph
+        ? layoutGraphPanel({ x: panelX, y: panelY, w: panelW, rowH: UI.rowH }, graph)
+        : null;
 
       // Build renderRows: enough info to draw rows + compute port positions
       const renderRows = [];
@@ -448,7 +464,7 @@ app.registerExtension({
         // PR3a: for object/ref draw an output port on the values chip
         let outPort = null;
         let outPortKind = null;
-        if (f.type === "ref") {
+        if (showGraph && f.type === "ref") {
           outPortKind = "ref";
           outPort = { x: valsRect.x + valsRect.w - 10, y: valsRect.y + valsRect.h / 2 };
         }
@@ -496,15 +512,17 @@ app.registerExtension({
       }
 
       // --- PR3a: draw edges first (behind UI chips) ---
-      for (const e of graph.edges) {
-        // find row port by pathKey
-        const rr = renderRows.find((r2) => r2.kind === "field" && r2.pathKey === e.fromPathKey);
-        if (!rr || !rr.outPort) continue;
+      if (showGraph && graph && nodeLayout) {
+        for (const e of graph.edges) {
+          // find row port by pathKey
+          const rr = renderRows.find(r => r.kind === "field" && r.pathKey === e.fromPathKey);
+          if (!rr || !rr.outPort) continue;
 
-        const target = nodeLayout.get(e.toNodeId);
-        if (!target) continue;
+          const target = nodeLayout.get(e.toNodeId);
+          if (!target) continue;
 
-        drawBezierEdge(ctx, rr.outPort.x, rr.outPort.y, target.inPort.x, target.inPort.y, e.kind);
+          drawBezierEdge(ctx, rr.outPort.x, rr.outPort.y, target.inPort.x, target.inPort.y, e.kind);
+        }
       }
 
       // --- Draw rows/chips/buttons (existing behavior) ---
@@ -525,20 +543,22 @@ app.registerExtension({
       }
 
       // --- PR3a: draw graph panel nodes + their ports ---
-      // Panel label
-      ctx.save();
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.font = "10px sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.fillText("Schema Graph", panelX, panelY - 14);
-      ctx.restore();
+      if (showGraph && nodeLayout) {
+        // Panel label
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = "10px sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Schema Graph", panelX, panelY - 14);
+        ctx.restore();
 
-      for (const n of nodeLayout.values()) {
-        drawChip(ctx, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.label);
+        for (const n of nodeLayout.values()) {
+          drawChip(ctx, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.label);
 
-        // in/out ports on nodes
-        drawPort(ctx, n.inPort.x, n.inPort.y, "default", 4);
-        drawPort(ctx, n.outPort.x, n.outPort.y, "default", 4);
+          // in/out ports on nodes
+          drawPort(ctx, n.inPort.x, n.inPort.y, "default", 4);
+          drawPort(ctx, n.outPort.x, n.outPort.y, "default", 4);
+        }
       }
 
       // Scrollbar (right side)
@@ -657,6 +677,14 @@ app.registerExtension({
             .join("\n");
           showToast(preview || "Validation issues found", "warn");
         }
+        stop();
+        return true;
+      }
+      // Header: Display Schema Graph checkbox
+      const displayGraphRect = hits?.header?.displayGraph;
+      if (displayGraphRect && hit(local, displayGraphRect)) {
+        state.display_graph = !state.display_graph;
+        state = commitState(this, state);
         stop();
         return true;
       }
