@@ -118,3 +118,37 @@ export function drawBezierEdge(ctx, x1, y1, x2, y2, kind = "default") {
 
   ctx.restore();
 }
+export function drawCheckbox(ctx, rect, checked, label) {
+  const box = 12;
+  const bx = rect.x;
+  const by = rect.y + Math.floor((rect.h - box) / 2);
+
+  ctx.save();
+
+  // box
+  ctx.beginPath();
+  ctx.roundRect(bx, by, box, box, 3);
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.stroke();
+
+  // check
+  if (checked) {
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx + 3, by + 6);
+    ctx.lineTo(bx + 5, by + 9);
+    ctx.lineTo(bx + 10, by + 3);
+    ctx.stroke();
+  }
+
+  // label
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.font = "10px sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(label ?? ""), bx + box + 8, rect.y + rect.h / 2);
+
+  ctx.restore();
+}

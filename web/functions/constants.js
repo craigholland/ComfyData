@@ -16,13 +16,13 @@ export const FIELD_TYPES = ["uuid", "int", "str", "decimal", "single-select", "o
 
 // Layout constants
 export const UI = {
-  pad: 8,
-  rowH: 22,
+  pad: 4,
+  rowH: 16,
   btnH: 16,
-  headerH: 26,
-  colNameW: 130,
-  colTypeW: 90,
-  colValsW: 180,
-  colRemoveW: 22,
-  indentW: 15, // nested object indentation
+  headerH: 20,
+  colNameW: 90,
+  colTypeW: 80,
+  colValsW: 150,
+  colRemoveW: 16,
+  indentW: 12, // nested object indentation
 };
