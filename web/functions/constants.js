@@ -18,11 +18,11 @@ export const FIELD_TYPES = ["uuid", "int", "str", "decimal", "single-select", "o
 export const UI = {
   pad: 8,
   rowH: 22,
-  btnH: 20,
+  btnH: 16,
   headerH: 26,
-  colNameW: 150,
-  colTypeW: 110,
+  colNameW: 130,
+  colTypeW: 90,
   colValsW: 180,
   colRemoveW: 22,
-  indentW: 18, // nested object indentation
+  indentW: 15, // nested object indentation
 };

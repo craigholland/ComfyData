@@ -11,8 +11,8 @@ import {
   drawButton,
   drawChip,
   drawX,
-    drawPort,
-    drawBezierEdge,
+  drawPort,
+  drawBezierEdge,
   hit,
   makeContextMenu,
   installMouseCaptureHook,
@@ -44,7 +44,7 @@ async function getSchemasCached(node) {
   // Cache list on the node instance for 10s to avoid spamming the backend
   const now = Date.now();
   const cache = node._comfydata_schema_list_cache;
-  if (cache && (now - cache.ts) < 10_000 && Array.isArray(cache.list)) return cache.list;
+  if (cache && now - cache.ts < 10_000 && Array.isArray(cache.list)) return cache.list;
 
   const res = await safeGetJson("/comfydata/schemas");
   if (!res?.ok) throw new Error(res?.error || "Failed to fetch schemas");
@@ -66,10 +66,8 @@ async function openRefPicker({ node, event, field, rect, state, commit }) {
   const selfName = String(state.schema_name || "").trim();
 
   const items = [];
-
   items.push("(clear)");
   items.push("(manual entry…)");
-
   // divider-ish
   items.push("────────");
 
@@ -83,26 +81,30 @@ async function openRefPicker({ node, event, field, rect, state, commit }) {
     }
   }
 
-  makeContextMenu(items, (picked) => {
-    if (picked === "(clear)") {
-      delete field.ref;
-      commit();
-      return;
-    }
-    if (picked === "(manual entry…)") {
-      beginInlineEdit(node, rect, String(field.ref ?? ""), (val) => {
-        field.ref = (val || "").trim();
-        if (!field.ref) delete field.ref;
+  makeContextMenu(
+    items,
+    (picked) => {
+      if (picked === "(clear)") {
+        delete field.ref;
         commit();
-      });
-      return;
-    }
-    if (picked === "────────") return;
+        return;
+      }
+      if (picked === "(manual entry…)") {
+        beginInlineEdit(node, rect, String(field.ref ?? ""), (val) => {
+          field.ref = (val || "").trim();
+          if (!field.ref) delete field.ref;
+          commit();
+        });
+        return;
+      }
+      if (picked === "────────") return;
 
-    field.ref = String(picked || "").trim();
-    if (!field.ref) delete field.ref;
-    commit();
-  }, event);
+      field.ref = String(picked || "").trim();
+      if (!field.ref) delete field.ref;
+      commit();
+    },
+    event
+  );
 }
 
 app.registerExtension({
@@ -141,7 +143,7 @@ app.registerExtension({
       const errs = validation.errors || [];
       // We match any error path that starts with the field's path prefix
       // Example fieldPathStr: "schema.fields.address"
-      return errs.some(e => typeof e.path === "string" && e.path.startsWith(fieldPathStr));
+      return errs.some((e) => typeof e.path === "string" && e.path.startsWith(fieldPathStr));
     }
 
     function buildSchemaPathFromRow(row, state) {
@@ -151,7 +153,7 @@ app.registerExtension({
       let parts = ["schema", "fields"];
       for (let depth = 0; depth < row.path.length; depth++) {
         const idx = row.path[depth];
-        const f = (fields && fields[idx]) ? fields[idx] : null;
+        const f = fields && fields[idx] ? fields[idx] : null;
         const name = (f?.name || "").trim();
         if (!name) break;
         parts.push(name);
@@ -163,7 +165,8 @@ app.registerExtension({
       }
       return parts.join(".");
     }
-        // PR3a: compute "owner node id" from a row path
+
+    // PR3a: compute "owner node id" from a row path
     function buildOwnerNodeIdFromRow(row, state) {
       // owner node is the containing object (or root schema)
       // Row path is indices; we translate to names up to parent of field.
@@ -171,7 +174,7 @@ app.registerExtension({
       const parts = [];
       for (let depth = 0; depth < row.path.length - 1; depth++) {
         const idx = row.path[depth];
-        const f = (fields && fields[idx]) ? fields[idx] : null;
+        const f = fields && fields[idx] ? fields[idx] : null;
         const name = (f?.name || "").trim();
         if (!name) break;
         parts.push(name);
@@ -215,12 +218,17 @@ app.registerExtension({
         const fname = (f?.name || "").trim();
         if (!fname) continue;
 
+        // computed but not used in ref-only mode; kept for later PRs
         const ownerNodeId = buildOwnerNodeIdFromRow(row, state);
+        void ownerNodeId;
+        void buildInlineNodeId;
 
         if (f.type === "ref") {
           const toId = buildSchemaNodeId(f.ref);
           if (!toId) continue;
-          if (!nodes.has(toId)) nodes.set(toId, { id: toId, label: toId.slice("SCHEMA:".length), kind: "schema" });
+          if (!nodes.has(toId)) {
+            nodes.set(toId, { id: toId, label: toId.slice("SCHEMA:".length), kind: "schema" });
+          }
           edges.push({ kind: "ref", fromPathKey: pathKey(row.path), toNodeId: toId });
         }
       }
@@ -279,36 +287,13 @@ app.registerExtension({
       const y0 = UI.pad;
       const w = this.size[0] - UI.pad * 2;
 
-      // Title
-      ctx.save();
-      ctx.fillStyle = "rgba(255,255,255,0.88)";
-      ctx.font = "13px sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.fillText("ComfyData Schema Editor", x0, y0 + UI.headerH / 2);
-      ctx.restore();
-
-      // Schema name chip
-      const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
-
-      const chipWidth = Math.max(0, (w - 180) * 0.65);
-      const chipRect = { x: x0 + 180, y: y0 + 3, w: chipWidth, h: UI.btnH };
-      drawChip(ctx, chipRect.x, chipRect.y, chipRect.w, chipRect.h, `schema.name: ${schemaLabel}`);
-      this._comfydata_hits.header.schemaName = chipRect;
-
-      const v = state.validation;
-      const vText = !v ? "Validation: (n/a)"
-          : (v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`);
-
-      const vW = 170;
-      const vX = Math.min(x0 + w - vW, x0 + 180 + chipWidth + 10);
-      const vRect = { x: vX, y: y0 + 3, w: vW, h: UI.btnH };
-      drawChip(ctx, vRect.x, vRect.y, vRect.w, vRect.h, vText);
-      this._comfydata_hits.header.validation = vRect;
-
-      // Buttons
-      const btnY = y0 + UI.headerH + 4;
-      const btnW = 86;
-      const gap = 8;
+      // ─────────────────────────────────────────────────────────────
+      // Row 1: Buttons (small, top row)
+      // ─────────────────────────────────────────────────────────────
+      const btnY = y0 + 2;
+      const btnW = 62; // tighter buttons
+      const btnGap = 6;
+      const btnH = UI.btnH; // from constants.js
       const buttons = [
         { key: "new", label: "New" },
         { key: "load", label: "Load" },
@@ -320,24 +305,56 @@ app.registerExtension({
       let bx = x0;
       this._comfydata_hits.buttons = {};
       for (const b of buttons) {
-        const rect = { x: bx, y: btnY, w: btnW, h: UI.btnH };
+        const rect = { x: bx, y: btnY, w: btnW, h: btnH };
         drawButton(ctx, rect.x, rect.y, rect.w, rect.h, b.label);
         this._comfydata_hits.buttons[b.key] = rect;
-        bx += btnW + gap;
+        bx += btnW + btnGap;
       }
 
-      // Table header
-      const tableY = btnY + UI.btnH + 10;
+      // ─────────────────────────────────────────────────────────────
+      // Row 2: schema.name + validation chips (compact)
+      // ─────────────────────────────────────────────────────────────
+      const chipY = btnY + btnH + 6;
+      const chipH = btnH; // match button height
+
+      const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
+
+      const v = state.validation;
+      const vText = !v ? "Validation: (n/a)" : v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`;
+
+      // We want compact chips, not “eat the row” chips.
+      // We’ll cap schema chip width and ensure validation is always visible.
+      const vW = 150; // smaller than your 170
+      const chipGap = 8;
+      const schemaMinW = 220;
+      const schemaMaxW = 360; // hard cap so it doesn't dominate
+
+      const schemaW = Math.max(schemaMinW, Math.min(schemaMaxW, w - vW - chipGap));
+
+      const schemaRect = { x: x0, y: chipY, w: schemaW, h: chipH };
+      drawChip(ctx, schemaRect.x, schemaRect.y, schemaRect.w, schemaRect.h, `schema.name: ${schemaLabel}`);
+      this._comfydata_hits.header.schemaName = schemaRect;
+
+      const vX = schemaRect.x + schemaRect.w + chipGap;
+      const vRect = { x: vX, y: chipY, w: Math.max(90, w - (vX - x0)), h: chipH };
+      drawChip(ctx, vRect.x, vRect.y, vRect.w, vRect.h, vText);
+      this._comfydata_hits.header.validation = vRect;
+
+      // ─────────────────────────────────────────────────────────────
+      // Table header (tight, based on UI constants)
+      // ─────────────────────────────────────────────────────────────
+      const tableY = chipY + chipH + 10;
+
       ctx.save();
       ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.font = "12px sans-serif";
+      ctx.font = "10px sans-serif"; // smaller header font
       ctx.textBaseline = "middle";
       ctx.fillText("Field", x0, tableY + UI.rowH / 2);
       ctx.fillText("Type", x0 + UI.colNameW + 10, tableY + UI.rowH / 2);
       ctx.fillText("Values / Expand", x0 + UI.colNameW + UI.colTypeW + 20, tableY + UI.rowH / 2);
       ctx.restore();
 
-            // Rows (flattened w/ nesting)
+      // Rows (flattened w/ nesting)
       this._comfydata_hits.rows = [];
       let ry = tableY + UI.rowH + 6;
 
@@ -362,11 +379,10 @@ app.registerExtension({
       const visibleRows = flat.slice(start, start + Math.max(maxRows, 0));
 
       // Graph panel sizing/placement (right side)
-      const tableRight =
-        x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
+      const tableRight = x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
 
       const panelGap = 18;
-      const panelW = 220;
+      const panelW = 190;
       const panelX = Math.max(tableRight + panelGap, this.size[0] - UI.pad - panelW - 14);
       const panelY = tableY + UI.rowH + 6;
 
@@ -437,7 +453,6 @@ app.registerExtension({
           outPort = { x: valsRect.x + valsRect.w - 10, y: valsRect.y + valsRect.h / 2 };
         }
 
-
         renderRows.push({
           kind: "field",
           row,
@@ -483,7 +498,7 @@ app.registerExtension({
       // --- PR3a: draw edges first (behind UI chips) ---
       for (const e of graph.edges) {
         // find row port by pathKey
-        const rr = renderRows.find(r => r.kind === "field" && r.pathKey === e.fromPathKey);
+        const rr = renderRows.find((r2) => r2.kind === "field" && r2.pathKey === e.fromPathKey);
         if (!rr || !rr.outPort) continue;
 
         const target = nodeLayout.get(e.toNodeId);
@@ -513,7 +528,7 @@ app.registerExtension({
       // Panel label
       ctx.save();
       ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.font = "12px sans-serif";
+      ctx.font = "10px sans-serif";
       ctx.textBaseline = "middle";
       ctx.fillText("Schema Graph", panelX, panelY - 14);
       ctx.restore();
@@ -535,8 +550,7 @@ app.registerExtension({
         const trackH = viewportH;
 
         const thumbH = Math.max(18, Math.floor((maxRows / totalRows) * trackH));
-        const thumbY =
-          trackY + Math.floor((state.scroll_row / Math.max(1, maxScrollRow)) * (trackH - thumbH));
+        const thumbY = trackY + Math.floor((state.scroll_row / Math.max(1, maxScrollRow)) * (trackH - thumbH));
 
         ctx.save();
         ctx.fillStyle = "rgba(255,255,255,0.08)";
@@ -637,7 +651,10 @@ app.registerExtension({
           showToast("Validation OK", "success");
         } else {
           const errs = Array.isArray(v.errors) ? v.errors : [];
-          const preview = errs.slice(0, 4).map(e => `• ${e.path}: ${e.message}`).join("\n");
+          const preview = errs
+            .slice(0, 4)
+            .map((e2) => `• ${e2.path}: ${e2.message}`)
+            .join("\n");
           showToast(preview || "Validation issues found", "warn");
         }
         stop();
@@ -827,19 +844,20 @@ app.registerExtension({
                 }, 0);
               }
 
-               if (f.type === "ref") {
-                 setTimeout(() => {
-                     openRefPicker({
-                      node: this,
-                      event: e,
-                      field: f,
-                      rect: row.valsRect,
-                      state,
-                      commit: () => { state = commitState(this, state); },
-                    });
-                  }, 0);
-                }
-
+              if (f.type === "ref") {
+                setTimeout(() => {
+                  openRefPicker({
+                    node: this,
+                    event: e,
+                    field: f,
+                    rect: row.valsRect,
+                    state,
+                    commit: () => {
+                      state = commitState(this, state);
+                    },
+                  });
+                }, 0);
+              }
 
               state = commitState(this, state);
             },
@@ -868,18 +886,19 @@ app.registerExtension({
           }
 
           if (f.type === "ref") {
-              openRefPicker({
-                node: this,
-                event: e,
-                field: f,
-                rect: row.valsRect,
-                state,
-                commit: () => { state = commitState(this, state); },
-              });
-              stop();
-              return true;
+            openRefPicker({
+              node: this,
+              event: e,
+              field: f,
+              rect: row.valsRect,
+              state,
+              commit: () => {
+                state = commitState(this, state);
+              },
+            });
+            stop();
+            return true;
           }
-
 
           stop();
           return true;
