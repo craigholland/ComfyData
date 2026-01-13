@@ -125,7 +125,7 @@ app.registerExtension({
 
       const r = origOnNodeCreated?.apply(this, arguments);
 
-      ensureNodeSize(this, 860, 320);
+      ensureNodeSize(this, 500, 250);
       getState(this); // init + normalize
 
       const w = getSchemaYamlWidget(this);
@@ -281,7 +281,7 @@ app.registerExtension({
       const r = origOnDrawForeground?.apply(this, arguments);
       if (this.flags?.collapsed) return r;
 
-      ensureNodeSize(this);
+      ensureNodeSize(this, 500, 250);
       const state = getState(this);
 
       const x0 = UI.pad;
@@ -368,7 +368,7 @@ app.registerExtension({
 
       // PR3a: increase node width to make room for graph panel
       // (we do it here too because users can resize)
-      ensureNodeSize(this, 860, 320);
+      ensureNodeSize(this, 500, 250);
 
       // We build a "render plan" for rows first (layout pass).
       const flat = flattenRows(state.fields, 0, []);
