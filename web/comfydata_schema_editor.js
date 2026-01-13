@@ -41,6 +41,33 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+// Graph panel sizing (keep these in sync with layout math)
+const GRAPH_PANEL_GAP = 60;   // currently your panelGap
+const GRAPH_PANEL_W   = 120;  // currently your panelW
+
+function applyGraphVisibilityResize(node, showGraph) {
+  const delta = GRAPH_PANEL_GAP + GRAPH_PANEL_W;
+
+  // Track whether we've already applied the width delta
+  if (typeof node._comfydata_graph_applied !== "boolean") {
+    node._comfydata_graph_applied = false;
+  }
+
+  if (showGraph) {
+    if (!node._comfydata_graph_applied) {
+      node.size[0] = (node.size?.[0] || 0) + delta;
+      node._comfydata_graph_applied = true;
+    }
+  } else {
+    if (node._comfydata_graph_applied) {
+      node.size[0] = Math.max(0, (node.size?.[0] || 0) - delta);
+      node._comfydata_graph_applied = false;
+    }
+  }
+}
+
+
+
 async function getSchemasCached(node) {
   // Cache list on the node instance for 10s to avoid spamming the backend
   const now = Date.now();
@@ -126,7 +153,13 @@ app.registerExtension({
       const r = origOnNodeCreated?.apply(this, arguments);
 
       ensureNodeSize(this, 500, 250);
-      getState(this); // init + normalize
+      const state = getState(this); // init + normalize
+      // Ensure our "width delta applied" flag matches saved state
+      this._comfydata_graph_applied = !!state.display_graph;
+
+      // If a saved workflow opens with graph enabled, apply the width once.
+      applyGraphVisibilityResize(this, !!state.display_graph);
+
 
       const w = getSchemaYamlWidget(this);
       if (w) {
@@ -391,8 +424,8 @@ app.registerExtension({
 
       // Graph panel sizing/placement (right side)
       const tableRight = x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
-      const panelGap = 60; // reduce whitespace between table and graph
-      const panelW = 120;
+      const panelGap = GRAPH_PANEL_GAP; // reduce whitespace between table and graph
+      const panelW = GRAPH_PANEL_W;
       const preferredPanelX = tableRight + panelGap;
       const maxPanelX = this.size[0] - UI.pad - panelW - 14;
       const panelX = preferredPanelX <= maxPanelX ? preferredPanelX : maxPanelX;
@@ -687,11 +720,17 @@ app.registerExtension({
       // Header: Display Schema Graph checkbox
       const displayGraphRect = hits?.header?.displayGraph;
       if (displayGraphRect && hit(local, displayGraphRect)) {
-        state.display_graph = !state.display_graph;
+        const next = !state.display_graph;
+        state.display_graph = next;
+
+        // Resize node width in sync with the checkbox toggle
+        applyGraphVisibilityResize(this, next);
+
         state = commitState(this, state);
         stop();
         return true;
       }
+
 
       // Buttons
       for (const [k, rect] of Object.entries(btns)) {
