@@ -12,7 +12,7 @@ import {
   drawChip,
   drawX,
   drawPort,
-  drawBezierEdge, 
+  drawBezierEdge,
   drawCheckbox,
   hit,
   makeContextMenu,
@@ -317,30 +317,26 @@ app.registerExtension({
       // ─────────────────────────────────────────────────────────────
       const chipY = btnY + btnH + 6;
       const chipH = btnH; // match button height
-      
+
       const schemaLabel = state.schema_name?.trim() ? state.schema_name.trim() : "(click to name schema)";
       const chipW = 180;
       const schemaRect = { x: x0, y: chipY, w: chipW, h: chipH };
-      drawChip(
-        ctx,
-        schemaRect.x,
-        schemaRect.y,
-        schemaRect.w,
-        schemaRect.h,
-        `schema.name: ${schemaLabel}`
-      );
+      drawChip(ctx, schemaRect.x, schemaRect.y, schemaRect.w, schemaRect.h, `schema.name: ${schemaLabel}`);
       this._comfydata_hits.header.schemaName = schemaRect;
 
       // ─────────────────────────────────────────────────────────────
-      // Row 3: validation chip (next row, fixed width 180)
+      // Row 3: validation chip (next row, fixed width)
       // ─────────────────────────────────────────────────────────────
       const v = state.validation;
       const vText = !v
         ? "Validation: (n/a)"
-        : (v.ok ? "Validation: OK" : `Validation: ${v.errors?.length || 0} issue(s)`);
+        : v.ok
+          ? "Validation: OK"
+          : `Validation: ${v.errors?.length || 0} issue(s)`;
 
       const validationY = chipY + chipH + 6;
-      const vRect = { x: x0, y: validationY, w: chipW, h: chipH };
+      const vChipW = 90;
+      const vRect = { x: x0, y: validationY, w: vChipW, h: chipH };
       drawChip(ctx, vRect.x, vRect.y, vRect.w, vRect.h, vText);
       this._comfydata_hits.header.validation = vRect;
 
@@ -384,6 +380,9 @@ app.registerExtension({
       const canScroll = totalRows > maxRows && maxRows > 0;
       const maxScrollRow = canScroll ? Math.max(0, totalRows - maxRows) : 0;
 
+      // Update #2: hint that graph is drawn from visible refs when scrolling is active
+      const graphMayBeTruncated = canScroll && !!state.display_graph;
+
       const desired = clamp(state.scroll_row || 0, 0, maxScrollRow);
       if (desired !== state.scroll_row) state.scroll_row = desired;
 
@@ -392,18 +391,16 @@ app.registerExtension({
 
       // Graph panel sizing/placement (right side)
       const tableRight = x0 + UI.colNameW + 10 + UI.colTypeW + 20 + UI.colValsW + 30 + UI.colRemoveW;
-      const panelGap = 80; // reduce whitespace between table and graph
-      const panelW = 190;
+      const panelGap = 60; // reduce whitespace between table and graph
+      const panelW = 120;
       const preferredPanelX = tableRight + panelGap;
       const maxPanelX = this.size[0] - UI.pad - panelW - 14;
-      const panelX = Math.min(preferredPanelX, maxPanelX);
+      const panelX = preferredPanelX <= maxPanelX ? preferredPanelX : maxPanelX;
       const panelY = tableY + UI.rowH + 6;
 
       const showGraph = !!state.display_graph;
       const graph = showGraph ? deriveGraphFromState(state) : null;
-      const nodeLayout = showGraph
-        ? layoutGraphPanel({ x: panelX, y: panelY, w: panelW, rowH: UI.rowH }, graph)
-        : null;
+      const nodeLayout = showGraph ? layoutGraphPanel({ x: panelX, y: panelY, w: panelW, rowH: UI.rowH }, graph) : null;
 
       // Build renderRows: enough info to draw rows + compute port positions
       const renderRows = [];
@@ -488,6 +485,12 @@ app.registerExtension({
         ry += rowStep;
       }
 
+      // Update #1: build quick lookup from pathKey -> renderRow for edge drawing
+      const renderRowByPathKey = new Map();
+      for (const rr of renderRows) {
+        if (rr.kind === "field") renderRowByPathKey.set(rr.pathKey, rr);
+      }
+
       // Populate hit table now (needed for onMouseDown)
       for (const rr of renderRows) {
         if (rr.kind === "add_child") {
@@ -514,8 +517,8 @@ app.registerExtension({
       // --- PR3a: draw edges first (behind UI chips) ---
       if (showGraph && graph && nodeLayout) {
         for (const e of graph.edges) {
-          // find row port by pathKey
-          const rr = renderRows.find(r => r.kind === "field" && r.pathKey === e.fromPathKey);
+          // find row port by pathKey (O(1) lookup)
+          const rr = renderRowByPathKey.get(e.fromPathKey);
           if (!rr || !rr.outPort) continue;
 
           const target = nodeLayout.get(e.toNodeId);
@@ -549,7 +552,7 @@ app.registerExtension({
         ctx.fillStyle = "rgba(255,255,255,0.55)";
         ctx.font = "10px sans-serif";
         ctx.textBaseline = "middle";
-        ctx.fillText("Schema Graph", panelX, panelY - 14);
+        ctx.fillText(graphMayBeTruncated ? "Schema Graph (visible refs)" : "Schema Graph", panelX, panelY - 14);
         ctx.restore();
 
         for (const n of nodeLayout.values()) {
@@ -680,6 +683,7 @@ app.registerExtension({
         stop();
         return true;
       }
+
       // Header: Display Schema Graph checkbox
       const displayGraphRect = hits?.header?.displayGraph;
       if (displayGraphRect && hit(local, displayGraphRect)) {
