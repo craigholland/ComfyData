@@ -27,18 +27,32 @@ export function drawButton(ctx, x, y, w, h, label) {
   ctx.restore();
 }
 
-export function drawChip(ctx, x, y, w, h, text) {
+export function drawChip(ctx, x, y, w, h, text, opts = {}) {
+  const {
+    font = "11px sans-serif",
+    padX = 8,
+    radius = 6,
+    fillStyle = "rgba(80,160,255,0.14)",
+    strokeStyle = "rgba(80,160,255,0.28)",
+    textStyle = "rgba(255,255,255,0.92)",
+  } = opts;
+
   ctx.save();
+
+  // Chip background
   ctx.beginPath();
-  ctx.roundRect(x, y, w, h, 6);
-  ctx.fillStyle = "rgba(80,160,255,0.14)";
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fillStyle = fillStyle;
   ctx.fill();
-  ctx.strokeStyle = "rgba(80,160,255,0.28)";
+  ctx.strokeStyle = strokeStyle;
   ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = "11px sans-serif";
+
+  // Text
+  ctx.fillStyle = textStyle;
+  ctx.font = font;
   ctx.textBaseline = "middle";
-  ctx.fillText(String(text ?? ""), x + 8, y + h / 2);
+  ctx.fillText(String(text ?? ""), x + padX, y + h / 2);
+
   ctx.restore();
 }
 

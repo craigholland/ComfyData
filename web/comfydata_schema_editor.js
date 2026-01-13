@@ -43,7 +43,7 @@ function clamp(v, lo, hi) {
 
 // Graph panel sizing (keep these in sync with layout math)
 const GRAPH_PANEL_GAP = 60;   // currently your panelGap
-const GRAPH_PANEL_W   = 120;  // currently your panelW
+const GRAPH_PANEL_W   =80;  // currently your panelW
 
 function applyGraphVisibilityResize(node, showGraph) {
   const delta = GRAPH_PANEL_GAP + GRAPH_PANEL_W;
@@ -589,7 +589,10 @@ app.registerExtension({
         ctx.restore();
 
         for (const n of nodeLayout.values()) {
-          drawChip(ctx, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.label);
+          drawChip(ctx, n.rect.x, n.rect.y, n.rect.w, n.rect.h, n.label, {
+              font: "9px sans-serif",
+              padX: 4,
+          });
 
           // in/out ports on nodes
           drawPort(ctx, n.inPort.x, n.inPort.y, "default", 4);
